@@ -31,6 +31,9 @@ For ordinal variables, ensure that only consecutive categories are combined to m
 - 1 column for the type of search (value: county + zip, county, zip)
 - 1 column for the number of identifiable combinations
 
+**Please feel free to write, re-write and overwrite temporary files to path_temporary_files**
+- Name files originating from a .R file with the first seven characters of the file name and a descriptive suffix, e.g., `plan_derived_bins.csv`.
+
 Priority:
 - Combinations of two or more variables from both County + Zip
 - Combinations of two or more variables from Zip
