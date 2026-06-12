@@ -1,4 +1,4 @@
 library(tidyverse)
 
-path_crosswalk_files = "C:/Cloud/OneDrive - Emory University/Data Sharing/USDA"
-path_temporary_files = "C:/Cloud/OneDrive - Emory University/Spring 2026/NEMESIS/Spatial Deidentification"
+path_crosswalk_files = "C:/Users/jvargh7/Box/Data/NEMESIS"
+path_temporary_files = paste0(path_crosswalk_files,"/temporary")

@@ -3,6 +3,7 @@ rm(list = ls()); gc(); source(".Rprofile")
 set.seed(42)
 library(tidyverse)
 library(readxl)
+library(mirai)
 
 source("functions/spatial_deidentification_helpers.R")
 
@@ -57,6 +58,63 @@ message(sprintf("Merged dataset: %s rows (%s unique ZCTAs, %s unique counties)",
                 nrow(merged_binned),
                 n_distinct(merged_binned$ZIP),
                 n_distinct(merged_binned$COUNTY)))
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 2.1b  Parallel workers (mirai + daemons)
+# Workers receive a snapshot of the binned data once at startup, then again
+# only when a coarsening is committed (rare).  Each mirai task receives only
+# the small candidate vector; the heavy data frames stay on the workers.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+
+daemons(4)
+message(sprintf("Started %d parallel worker(s)", 4))
+
+# Push binned datasets + helpers to every worker.  Called at startup and again
+# whenever a coarsening commits new bin values to county_binned / zip_binned /
+# merged_binned.
+push_to_workers <- function(county_b, zip_b, merged_b, vsrc, h_path) {
+  invisible(lapply(
+    everywhere(
+      {
+        suppressPackageStartupMessages(library(tidyverse))
+        source(h_path)
+        .SD_county <<- county_b
+        .SD_zip    <<- zip_b
+        .SD_merged <<- merged_b
+        .SD_vsrc   <<- vsrc
+      },
+      county_b = county_b,
+      zip_b    = zip_b,
+      merged_b = merged_b,
+      vsrc     = vsrc,
+      h_path   = h_path
+    ),
+    function(m) m[]
+  ))
+}
+
+push_to_workers(county_binned, zip_binned, merged_binned, var_source, .helpers_abs)
+
+# Dispatch one candidate evaluation to a free worker.
+# Workers use their local data snapshot; only the tiny candidate vector is sent.
+test_cand_async <- function(cand) {
+  mirai(
+    {
+      sv <- list(
+        county = cand[.SD_vsrc[cand] == "county"],
+        zip    = cand[.SD_vsrc[cand] == "zip"]
+      )
+      list(
+        cand = cand,
+        sv   = sv,
+        res  = test_subset(.SD_county, .SD_zip, .SD_merged, sv$county, sv$zip)
+      )
+    },
+    cand = cand
+  )
+}
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 2.2  Apriori-style subset search with re-coarsening
@@ -143,6 +201,8 @@ for (k in seq_len(length(all_vars) - 1L)) {
       seen_keys <- c(seen_keys, key)
 
       # Apriori pruning: skip if any k-subset of cand is in invalid_set
+      # Guard: cand must have exactly k+1 elements (defensive against NULL in current_valid)
+      if (length(cand) != k + 1L) next
       k_sub_keys <- apply(
         combn(length(cand), k), 2L,
         function(idx) subset_key(cand[idx])
@@ -160,14 +220,31 @@ for (k in seq_len(length(all_vars) - 1L)) {
 
   message(sprintf("Level %d: testing %d candidate(s)...", k + 1L, length(candidates)))
 
-  next_valid <- list()
+  # ── Parallel first pass: dispatch all candidates simultaneously ───────────
+  m_list    <- lapply(candidates, test_cand_async)
+  p_results <- lapply(m_list, function(m) m[])   # collect; blocks until all done
 
-  for (cand in candidates) {
-    sv  <- split_vars(cand)
-    res <- test_subset(county_binned, zip_binned, merged_binned, sv$county, sv$zip)
+  # ── Process results ───────────────────────────────────────────────────────
+  # Iterate by index so we can always recover cand/sv from `candidates` even
+  # when the worker returned a miraiError (pr$cand would be NULL in that case).
+  next_valid   <- list()
+  fail_batch   <- list()
+  bins_updated <- FALSE
 
-    if (res$passes) {
-      # ── Candidate passes with current bins ────────────────────────────────
+  for (i in seq_along(p_results)) {
+    pr   <- p_results[[i]]
+    cand <- candidates[[i]]          # always reliable; recovered from the dispatch list
+    sv   <- split_vars(cand)
+
+    if (inherits(pr, "miraiError")) {
+      # Worker failed — log and queue for sequential re-evaluation
+      warning(sprintf(
+        "Worker error for candidate {%s}: %s",
+        paste(cand, collapse = ", "),
+        as.character(pr)
+      ))
+      fail_batch <- c(fail_batch, list(list(cand = cand, sv = sv, iter = iteration_ctr)))
+    } else if (isTRUE(pr$res$passes)) {
       next_valid <- c(next_valid, list(cand))
       search_log[[length(search_log) + 1L]] <- list(
         iteration     = iteration_ctr,
@@ -175,86 +252,119 @@ for (k in seq_len(length(all_vars) - 1L)) {
         n_vars        = length(cand),
         passes        = TRUE,
         n_fail        = 0L,
-        dataset_type  = res$dataset_type,
+        dataset_type  = pr$res$dataset_type,
         coarsened     = FALSE,
         coarsened_var = NA_character_
       )
     } else {
-      # ── Try re-coarsening one variable at a time ───────────────────────────
-      # Monotonicity: coarsening can only enlarge cells → safe to update globally
-      found_coarsening <- FALSE
+      # Candidate failed — queue for sequential coarsening attempt
+      fail_batch <- c(fail_batch, list(list(cand = cand, sv = sv, iter = iteration_ctr)))
+    }
+    iteration_ctr <- iteration_ctr + 1L
+  }
 
-      for (v_coarsen in cand) {
-        src     <- var_source[v_coarsen]
-        cur_def <- if (src == "county") county_bin_defs[[v_coarsen]]
-                   else                 zip_bin_defs[[v_coarsen]]
+  # ── Sequential coarsening pass ────────────────────────────────────────────
+  # Coarsening is monotone (only enlarges cells), so committing mid-batch is
+  # safe.  Re-test with current bins first — a prior coarsening in this batch
+  # may already fix the failing candidate without further action.
+  for (fb in fail_batch) {
+    cand <- fb$cand       # always a proper character vector (stored at dispatch time)
+    sv   <- fb$sv
+    iter <- fb$iter
 
-        for (new_def in coarsen_one_step(cur_def)) {
-          # Temporarily apply the coarsened bin to all three data frames
-          bin_col <- paste0(v_coarsen, "_bin")
+    cur_res <- test_subset(county_binned, zip_binned, merged_binned, sv$county, sv$zip)
 
-          cb_tmp <- county_binned
-          zb_tmp <- zip_binned
-          mb_tmp <- merged_binned
-
-          if (src == "county") {
-            new_col                  <- apply_bin_def(county_binned[[v_coarsen]], new_def)
-            cb_tmp[[bin_col]]        <- new_col
-            mb_tmp[[bin_col]]        <- apply_bin_def(merged_binned[[v_coarsen]], new_def)
-          } else {
-            new_col                  <- apply_bin_def(zip_binned[[v_coarsen]], new_def)
-            zb_tmp[[bin_col]]        <- new_col
-            mb_tmp[[bin_col]]        <- apply_bin_def(merged_binned[[v_coarsen]], new_def)
-          }
-
-          res2 <- test_subset(cb_tmp, zb_tmp, mb_tmp, sv$county, sv$zip)
-
-          if (res2$passes) {
-            # Accept — commit the coarsened bins globally (monotone: safe)
-            if (src == "county") {
-              county_bin_defs[[v_coarsen]] <- new_def
-              county_binned[[bin_col]]     <- cb_tmp[[bin_col]]
-              merged_binned[[bin_col]]     <- mb_tmp[[bin_col]]
-            } else {
-              zip_bin_defs[[v_coarsen]]    <- new_def
-              zip_binned[[bin_col]]        <- zb_tmp[[bin_col]]
-              merged_binned[[bin_col]]     <- mb_tmp[[bin_col]]
-            }
-
-            next_valid <- c(next_valid, list(cand))
-            search_log[[length(search_log) + 1L]] <- list(
-              iteration     = iteration_ctr,
-              vars          = paste(cand, collapse = ", "),
-              n_vars        = length(cand),
-              passes        = TRUE,
-              n_fail        = 0L,
-              dataset_type  = res2$dataset_type,
-              coarsened     = TRUE,
-              coarsened_var = v_coarsen
-            )
-            found_coarsening <- TRUE
-            break
-          }
-        }
-        if (found_coarsening) break
-      }
-
-      if (!found_coarsening) {
-        invalid_set <- c(invalid_set, subset_key(cand))
-        search_log[[length(search_log) + 1L]] <- list(
-          iteration     = iteration_ctr,
-          vars          = paste(cand, collapse = ", "),
-          n_vars        = length(cand),
-          passes        = FALSE,
-          n_fail        = res$n_fail,
-          dataset_type  = res$dataset_type,
-          coarsened     = FALSE,
-          coarsened_var = NA_character_
-        )
-      }
+    if (cur_res$passes) {
+      next_valid <- c(next_valid, list(cand))
+      search_log[[length(search_log) + 1L]] <- list(
+        iteration     = iter,
+        vars          = paste(cand, collapse = ", "),
+        n_vars        = length(cand),
+        passes        = TRUE,
+        n_fail        = 0L,
+        dataset_type  = cur_res$dataset_type,
+        coarsened     = FALSE,
+        coarsened_var = NA_character_
+      )
+      next
     }
 
-    iteration_ctr <- iteration_ctr + 1L
+    # ── Try re-coarsening one variable at a time ───────────────────────────
+    found_coarsening <- FALSE
+    coarsened_var_nm <- NA_character_
+
+    for (v_coarsen in cand) {
+      src     <- var_source[v_coarsen]
+      cur_def <- if (src == "county") county_bin_defs[[v_coarsen]]
+                 else                 zip_bin_defs[[v_coarsen]]
+
+      for (new_def in coarsen_one_step(cur_def)) {
+        bin_col <- paste0(v_coarsen, "_bin")
+
+        cb_tmp <- county_binned
+        zb_tmp <- zip_binned
+        mb_tmp <- merged_binned
+
+        if (src == "county") {
+          cb_tmp[[bin_col]] <- apply_bin_def(county_binned[[v_coarsen]], new_def)
+          mb_tmp[[bin_col]] <- apply_bin_def(merged_binned[[v_coarsen]], new_def)
+        } else {
+          zb_tmp[[bin_col]] <- apply_bin_def(zip_binned[[v_coarsen]], new_def)
+          mb_tmp[[bin_col]] <- apply_bin_def(merged_binned[[v_coarsen]], new_def)
+        }
+
+        res2 <- test_subset(cb_tmp, zb_tmp, mb_tmp, sv$county, sv$zip)
+
+        if (res2$passes) {
+          # Commit the coarsened bins globally (monotone: safe)
+          if (src == "county") {
+            county_bin_defs[[v_coarsen]] <- new_def
+            county_binned[[bin_col]]     <- cb_tmp[[bin_col]]
+            merged_binned[[bin_col]]     <- mb_tmp[[bin_col]]
+          } else {
+            zip_bin_defs[[v_coarsen]]    <- new_def
+            zip_binned[[bin_col]]        <- zb_tmp[[bin_col]]
+            merged_binned[[bin_col]]     <- mb_tmp[[bin_col]]
+          }
+          found_coarsening <- TRUE
+          coarsened_var_nm <- v_coarsen
+          bins_updated     <- TRUE
+          break
+        }
+      }
+      if (found_coarsening) break
+    }
+
+    if (found_coarsening) {
+      next_valid <- c(next_valid, list(cand))
+      search_log[[length(search_log) + 1L]] <- list(
+        iteration     = iter,
+        vars          = paste(cand, collapse = ", "),
+        n_vars        = length(cand),
+        passes        = TRUE,
+        n_fail        = 0L,
+        dataset_type  = dtype_label(sv),
+        coarsened     = TRUE,
+        coarsened_var = coarsened_var_nm
+      )
+    } else {
+      invalid_set <- c(invalid_set, subset_key(cand))
+      search_log[[length(search_log) + 1L]] <- list(
+        iteration     = iter,
+        vars          = paste(cand, collapse = ", "),
+        n_vars        = length(cand),
+        passes        = FALSE,
+        n_fail        = cur_res$n_fail,
+        dataset_type  = cur_res$dataset_type,
+        coarsened     = FALSE,
+        coarsened_var = NA_character_
+      )
+    }
+  }
+
+  # ── Re-sync workers if any coarsenings were committed this level ──────────
+  if (bins_updated) {
+    push_to_workers(county_binned, zip_binned, merged_binned, var_source, .helpers_abs)
   }
 
   if (length(next_valid) == 0L) {
@@ -267,6 +377,8 @@ for (k in seq_len(length(all_vars) - 1L)) {
   current_valid <- next_valid
   message(sprintf("Level %d: %d valid subset(s) found.", k + 1L, length(next_valid)))
 }
+
+daemons(0)   # release workers
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 2.3  Priority tie-breaking

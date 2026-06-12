@@ -7,21 +7,27 @@
 # ── Pass/fail primitives ──────────────────────────────────────────────────────
 
 #' Does a set of ZIP records pass the spatial de-identification threshold?
+#' Requires ≥ 2 distinct ZCTAs from each of ≥ 2 distinct states (≥ 4 total).
 #' @param zctas  character vector of ZCTA codes (NAs ignored)
 #' @param states character vector of corresponding state codes
 #' @return logical
 zip_side_passes <- function(zctas, states) {
-  n_distinct(zctas[!is.na(zctas)]) >= 2L &&
-    n_distinct(states[!is.na(states)]) >= 2L
+  valid <- !is.na(zctas) & !is.na(states)
+  if (!any(valid)) return(FALSE)
+  zctas_per_state <- tapply(zctas[valid], states[valid], function(z) length(unique(z)))
+  sum(zctas_per_state >= 2L) >= 2L
 }
 
 #' Does a set of county records pass the spatial de-identification threshold?
+#' Requires ≥ 2 distinct counties from each of ≥ 2 distinct states (≥ 4 total).
 #' @param fips   character vector of FIPS codes (NAs ignored)
 #' @param states character vector of corresponding state codes
 #' @return logical
 county_side_passes <- function(fips, states) {
-  n_distinct(fips[!is.na(fips)]) >= 2L &&
-    n_distinct(states[!is.na(states)]) >= 2L
+  valid <- !is.na(fips) & !is.na(states)
+  if (!any(valid)) return(FALSE)
+  fips_per_state <- tapply(fips[valid], states[valid], function(f) length(unique(f)))
+  sum(fips_per_state >= 2L) >= 2L
 }
 
 #' Does a cell pass? Either the ZIP side or the county side must pass.
@@ -90,10 +96,19 @@ make_ordinal_factor <- function(x, groups) {
 # ── Marginal pass/fail evaluators ─────────────────────────────────────────────
 
 #' Evaluate pass/fail for each bin of a county variable.
+#' Passes if ≥ 2 distinct counties from each of ≥ 2 distinct states.
 #' @param data    data frame containing FIPS, state_code, and the binned column
 #' @param bin_col name of the binned column
-#' @return tibble: bin | n_records | n_counties | n_states | passes
+#' @return tibble: bin | n_records | n_counties | n_states | n_states_with_2plus_counties | passes
 eval_marginal_county <- function(data, bin_col) {
+  states_with_enough <- data |>
+    filter(!is.na(.data[[bin_col]])) |>
+    group_by(bin = .data[[bin_col]], state_code) |>
+    summarise(n_counties_state = n_distinct(FIPS), .groups = "drop") |>
+    filter(n_counties_state >= 2L) |>
+    group_by(bin) |>
+    summarise(n_states_with_2plus_counties = n(), .groups = "drop")
+
   data |>
     filter(!is.na(.data[[bin_col]])) |>
     group_by(bin = .data[[bin_col]]) |>
@@ -103,14 +118,27 @@ eval_marginal_county <- function(data, bin_col) {
       n_states   = n_distinct(state_code),
       .groups    = "drop"
     ) |>
-    mutate(passes = n_counties >= 2L & n_states >= 2L)
+    left_join(states_with_enough, by = "bin") |>
+    mutate(
+      n_states_with_2plus_counties = coalesce(n_states_with_2plus_counties, 0L),
+      passes = n_states_with_2plus_counties >= 2L
+    )
 }
 
 #' Evaluate pass/fail for each bin of a ZIP variable.
+#' Passes if ≥ 2 distinct ZCTAs from each of ≥ 2 distinct states.
 #' @param data    data frame containing zcta, State, and the binned column
 #' @param bin_col name of the binned column
-#' @return tibble: bin | n_records | n_zctas | n_states | passes
+#' @return tibble: bin | n_records | n_zctas | n_states | n_states_with_2plus_zctas | passes
 eval_marginal_zip <- function(data, bin_col) {
+  states_with_enough <- data |>
+    filter(!is.na(.data[[bin_col]])) |>
+    group_by(bin = .data[[bin_col]], State) |>
+    summarise(n_zctas_state = n_distinct(zcta), .groups = "drop") |>
+    filter(n_zctas_state >= 2L) |>
+    group_by(bin) |>
+    summarise(n_states_with_2plus_zctas = n(), .groups = "drop")
+
   data |>
     filter(!is.na(.data[[bin_col]])) |>
     group_by(bin = .data[[bin_col]]) |>
@@ -120,7 +148,11 @@ eval_marginal_zip <- function(data, bin_col) {
       n_states  = n_distinct(State),
       .groups   = "drop"
     ) |>
-    mutate(passes = n_zctas >= 2L & n_states >= 2L)
+    left_join(states_with_enough, by = "bin") |>
+    mutate(
+      n_states_with_2plus_zctas = coalesce(n_states_with_2plus_zctas, 0L),
+      passes = n_states_with_2plus_zctas >= 2L
+    )
 }
 
 # ── Merge-until-valid engines ─────────────────────────────────────────────────
@@ -310,13 +342,15 @@ build_merged_dataset <- function(county_data, zip_data, crosswalk) {
 }
 
 #' Evaluate cells for a mixed (county + zip) combination using the merged dataset.
+#' Passes if ≥ 2 ZCTAs from each of ≥ 2 states OR ≥ 2 counties from each of ≥ 2 states.
 #' @param merged   merged dataset (from build_merged_dataset) with bin columns applied
 #' @param bin_cols character vector of *_bin column names to group by
 #' @return tibble: one row per cell with n_zctas, n_zip_states, n_counties,
 #'   n_county_states, zip_passes, county_passes, passes
 eval_cells_merged <- function(merged, bin_cols) {
-  merged |>
-    filter(if_all(all_of(bin_cols), ~ !is.na(.))) |>
+  filtered <- merged |> filter(if_all(all_of(bin_cols), ~ !is.na(.)))
+
+  base <- filtered |>
     group_by(across(all_of(bin_cols))) |>
     summarise(
       n_zctas         = n_distinct(ZIP),
@@ -324,21 +358,43 @@ eval_cells_merged <- function(merged, bin_cols) {
       n_counties      = n_distinct(COUNTY),
       n_county_states = n_distinct(state_fips),
       .groups         = "drop"
-    ) |>
+    )
+
+  zip_states_enough <- filtered |>
+    group_by(across(all_of(bin_cols)), zip_State) |>
+    summarise(n_zctas_state = n_distinct(ZIP), .groups = "drop") |>
+    filter(n_zctas_state >= 2L) |>
+    group_by(across(all_of(bin_cols))) |>
+    summarise(n_zip_states_with_2plus = n(), .groups = "drop")
+
+  county_states_enough <- filtered |>
+    group_by(across(all_of(bin_cols)), state_fips) |>
+    summarise(n_counties_state = n_distinct(COUNTY), .groups = "drop") |>
+    filter(n_counties_state >= 2L) |>
+    group_by(across(all_of(bin_cols))) |>
+    summarise(n_county_states_with_2plus = n(), .groups = "drop")
+
+  base |>
+    left_join(zip_states_enough,    by = bin_cols) |>
+    left_join(county_states_enough, by = bin_cols) |>
     mutate(
-      zip_passes    = n_zctas    >= 2L & n_zip_states    >= 2L,
-      county_passes = n_counties >= 2L & n_county_states >= 2L,
+      n_zip_states_with_2plus    = coalesce(n_zip_states_with_2plus,    0L),
+      n_county_states_with_2plus = coalesce(n_county_states_with_2plus, 0L),
+      zip_passes    = n_zip_states_with_2plus    >= 2L,
+      county_passes = n_county_states_with_2plus >= 2L,
       passes        = zip_passes | county_passes
     )
 }
 
 #' Evaluate county-only cells directly from county_data.
+#' Passes if ≥ 2 distinct counties from each of ≥ 2 distinct states.
 #' @param county_data data frame with FIPS, state_code, and bin columns
 #' @param bin_cols    character vector of *_bin column names
 #' @return tibble with standardised columns (n_zctas/n_zip_states = NA)
 eval_cells_county <- function(county_data, bin_cols) {
-  county_data |>
-    filter(if_all(all_of(bin_cols), ~ !is.na(.))) |>
+  filtered <- county_data |> filter(if_all(all_of(bin_cols), ~ !is.na(.)))
+
+  base <- filtered |>
     group_by(across(all_of(bin_cols))) |>
     summarise(
       n_zctas         = NA_integer_,
@@ -346,21 +402,34 @@ eval_cells_county <- function(county_data, bin_cols) {
       n_counties      = n_distinct(FIPS),
       n_county_states = n_distinct(state_code),
       .groups         = "drop"
-    ) |>
+    )
+
+  county_states_enough <- filtered |>
+    group_by(across(all_of(bin_cols)), state_code) |>
+    summarise(n_counties_state = n_distinct(FIPS), .groups = "drop") |>
+    filter(n_counties_state >= 2L) |>
+    group_by(across(all_of(bin_cols))) |>
+    summarise(n_county_states_with_2plus = n(), .groups = "drop")
+
+  base |>
+    left_join(county_states_enough, by = bin_cols) |>
     mutate(
+      n_county_states_with_2plus = coalesce(n_county_states_with_2plus, 0L),
       zip_passes    = FALSE,
-      county_passes = n_counties >= 2L & n_county_states >= 2L,
+      county_passes = n_county_states_with_2plus >= 2L,
       passes        = county_passes
     )
 }
 
 #' Evaluate zip-only cells directly from zip_data.
+#' Passes if ≥ 2 distinct ZCTAs from each of ≥ 2 distinct states.
 #' @param zip_data data frame with zcta, State, and bin columns
 #' @param bin_cols character vector of *_bin column names
 #' @return tibble with standardised columns (n_counties/n_county_states = NA)
 eval_cells_zip <- function(zip_data, bin_cols) {
-  zip_data |>
-    filter(if_all(all_of(bin_cols), ~ !is.na(.))) |>
+  filtered <- zip_data |> filter(if_all(all_of(bin_cols), ~ !is.na(.)))
+
+  base <- filtered |>
     group_by(across(all_of(bin_cols))) |>
     summarise(
       n_zctas         = n_distinct(zcta),
@@ -368,9 +437,20 @@ eval_cells_zip <- function(zip_data, bin_cols) {
       n_counties      = NA_integer_,
       n_county_states = NA_integer_,
       .groups         = "drop"
-    ) |>
+    )
+
+  zip_states_enough <- filtered |>
+    group_by(across(all_of(bin_cols)), State) |>
+    summarise(n_zctas_state = n_distinct(zcta), .groups = "drop") |>
+    filter(n_zctas_state >= 2L) |>
+    group_by(across(all_of(bin_cols))) |>
+    summarise(n_zip_states_with_2plus = n(), .groups = "drop")
+
+  base |>
+    left_join(zip_states_enough, by = bin_cols) |>
     mutate(
-      zip_passes    = n_zctas >= 2L & n_zip_states >= 2L,
+      n_zip_states_with_2plus = coalesce(n_zip_states_with_2plus, 0L),
+      zip_passes    = n_zip_states_with_2plus >= 2L,
       county_passes = FALSE,
       passes        = zip_passes
     )

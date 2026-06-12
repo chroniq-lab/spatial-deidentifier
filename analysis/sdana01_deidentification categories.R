@@ -105,8 +105,8 @@ write_csv(counties_per_zcta, file.path(path_temporary_files, "sdana01_counties_p
 # A CELL = one combination of category levels across selected variables.
 #
 # A cell PASSES if EITHER:
-#   (a) ≥ 2 distinct ZCTAs  from ≥ 2 distinct states, OR
-#   (b) ≥ 2 distinct county FIPS from ≥ 2 distinct states.
+#   (a) ≥ 2 distinct ZCTAs from each of ≥ 2 distinct states (≥ 4 ZCTAs total), OR
+#   (b) ≥ 2 distinct county FIPS from each of ≥ 2 distinct states (≥ 4 counties total).
 #
 # State derivation:
 #   ZIP records   → `State`      column in zip_data
