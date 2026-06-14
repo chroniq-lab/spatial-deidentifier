@@ -13,11 +13,11 @@ Stored under the ~/data folder
 - Zip-level data: zip_data
 
 ### Deriving Categorical Variables
-For continuous variables, start with different quantiles (e.g., 10th, 25th, 50th, 75th, and 90th percentiles) to create categories. Then, check the distribution of zip codes and counties within each category. If any category has fewer than 2 unique zip codes or counties from two different states each, adjust the quantiles or merge categories until the requirement is met.
+For continuous variables, start with different quantiles (e.g., 10th, 25th, 50th, 75th, and 90th percentiles) to create categories. Then, check the distribution of zip codes and counties within each category. If any category has fewer than 2 unique zip codes or counties from two different states each, adjust the quantiles or merge categories until the requirement is met. **Continuous variables must retain at least 4 categories (≥ 3 interior break-points) at all times — do not merge below this floor. `coarsen_one_step()` must return an empty list when a continuous def has ≤ 3 interior break-points.**
 
 For binary variables, ensure that each category (0 and 1) has at least 2 unique zip codes or counties each from at least two states. If not, consider combining the binary variable with another variable to create a new categorical variable that meets the requirement.
 
-For ordinal variables, ensure that only consecutive categories are combined to maintain the order. Check the distribution of zip codes and counties within each category and adjust as necessary to meet the requirement.
+For ordinal variables, ensure that only consecutive categories are combined to maintain the order. Check the distribution of zip codes and counties within each category and adjust as necessary to meet the requirement. **Ordinal variables must retain at least 4 categories at all times — do not merge below this floor. Both `merge_ordinal_bins()` (Phase 1) and `coarsen_one_step()` (Phase 2) must stop when `length(groups) <= 4L`.**
 
 ### Best Possible Subset
 

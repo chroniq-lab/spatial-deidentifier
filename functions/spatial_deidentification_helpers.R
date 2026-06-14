@@ -175,11 +175,11 @@ merge_continuous_bins <- function(data, var, init_breaks, eval_fn, max_iter = 30
   repeat {
     data[[TMP]] <- cut_with_breaks(data[[var]], cur_breaks)
     res         <- eval_fn(data, TMP)
-    if (all(res$passes) || iter >= max_iter) break
+    # Stop if all pass, hit iter cap, no breaks left, or floor reached (< 3 breaks → < 4 bins)
+    if (all(res$passes) || iter >= max_iter || length(cur_breaks) < 3L) break
 
     failing_idx <- which(!res$passes)[[1L]]
     n_bins      <- nrow(res)
-    if (length(cur_breaks) == 0L) break
 
     # Merge failing bin with its right neighbour; last bin → merge left
     if (failing_idx < n_bins) {
@@ -222,7 +222,8 @@ merge_ordinal_bins <- function(data, var, eval_fn, max_iter = 30L) {
   repeat {
     data[[TMP]] <- make_ordinal_factor(data[[var]], groups)
     res         <- eval_fn(data, TMP)
-    if (all(res$passes) || iter >= max_iter || length(groups) <= 1L) break
+    # Stop if all pass, hit iter cap, or floor reached (≤ 4 groups → cannot merge further)
+    if (all(res$passes) || iter >= max_iter || length(groups) <= 4L) break
 
     failing_idx <- which(!res$passes)[[1L]]
     n_bins      <- length(groups)
@@ -301,7 +302,8 @@ coarsen_one_step <- function(bin_def) {
 
   if (bin_def$type == "continuous") {
     breaks <- bin_def$breaks
-    if (length(breaks) <= 1L) return(list())   # 0 breaks = 1 bin, 1 break = 2 bins → removing gives 1 bin (ok, but no further steps)
+    # Floor: 3 interior breaks = 4 bins; removing any would drop below the floor
+    if (length(breaks) <= 3L) return(list())
     lapply(seq_along(breaks), function(i) {
       new_def          <- bin_def
       new_def$breaks   <- breaks[-i]
@@ -310,7 +312,8 @@ coarsen_one_step <- function(bin_def) {
     })
   } else {   # ordinal
     groups <- bin_def$groups
-    if (length(groups) <= 1L) return(list())
+    # Floor: 3 groups minimum; cannot merge a 3-group def further
+    if (length(groups) <= 3L) return(list())
     lapply(seq_len(length(groups) - 1L), function(i) {
       new_groups           <- groups
       new_groups[[i + 1L]] <- sort(c(groups[[i]], groups[[i + 1L]]))

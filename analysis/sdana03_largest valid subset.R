@@ -74,6 +74,7 @@ message(sprintf("Started %d parallel worker(s)", 4))
 # Push binned datasets + helpers to every worker.  Called at startup and again
 # whenever a coarsening commits new bin values to county_binned / zip_binned /
 # merged_binned.
+.helpers_abs <- normalizePath("functions/spatial_deidentification_helpers.R")
 push_to_workers <- function(county_b, zip_b, merged_b, vsrc, h_path) {
   invisible(lapply(
     everywhere(
