@@ -24,5 +24,5 @@ if not defined PY (
 )
 
 echo Using: %PY%
-%PY% "sdana05_app_server.py" %*
+%PY% "server.py" %*
 pause

@@ -1,7 +1,7 @@
 """
-Local server for the sdana05 config builder (standard library only).
+Local server for the de-identifier app (standard library only).
 
-Serves sdana05_config_builder.html and a small JSON API so the page can:
+Serves index.html and a small JSON API so the page can:
   GET  /api/env              -> Python version + required/optional package status
   POST /api/install          -> pip install missing packages (background job)
   POST /api/run   {config}   -> write config.json and run the de-identifier (background job)
@@ -9,14 +9,15 @@ Serves sdana05_config_builder.html and a small JSON API so the page can:
   GET  /api/results?id=..    -> run_summary.json + list of output files for a finished run
   GET  /api/file?id=..&name= -> download one output file of a run
 
-Binds to 127.0.0.1 only. Start via sdana05_launch.bat (Windows) or:
-    python analysis/sdana05_app_server.py [--port 8765] [--no-browser]
+Binds to 127.0.0.1 only. Start via launch.bat (Windows) / launch.sh, or:
+    python app/server.py [--port 8765] [--no-browser]
 """
 from __future__ import annotations
 
 import argparse
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -28,8 +29,8 @@ from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent                                   # relative config paths resolve here
-HTML = HERE / "sdana05_config_builder.html"
-SCRIPT = HERE / "sdana05_optimizing valid subsets.py"
+HTML = HERE / "index.html"
+SCRIPT = HERE / "deidentify.py"
 UPLOADS = ROOT / "uploads"                           # files sent from the browser land here
 
 # import name -> pip name
@@ -86,6 +87,39 @@ def start_job(kind, cmd, extra=None):
     return jid
 
 
+def browse(path_str):
+    """List sub-folders of a directory (for the output-folder picker)."""
+    if not path_str:
+        p = Path.home()
+    else:
+        p = Path(path_str).expanduser()
+        if not p.is_absolute():
+            p = ROOT / p
+    while not p.exists() and p != p.parent:          # fall back to nearest existing parent
+        p = p.parent
+    p = p.resolve()
+    dirs = []
+    try:
+        for d in sorted(p.iterdir(), key=lambda x: x.name.lower()):
+            try:
+                if d.is_dir() and not d.name.startswith((".", "$")):
+                    dirs.append(d.name)
+            except OSError:
+                pass
+    except OSError as e:
+        return {"path": str(p), "parent": str(p.parent), "dirs": [], "error": str(e)}
+    drives = []
+    if os.name == "nt":
+        drives = [f"{c}:\\" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" if Path(f"{c}:\\").exists()]
+    shortcuts = {"Home": str(Path.home()), "App folder": str(ROOT)}
+    for nm in ("Desktop", "Documents", "Downloads"):
+        if (Path.home() / nm).exists():
+            shortcuts[nm] = str(Path.home() / nm)
+    return {"path": str(p), "parent": str(p.parent) if p.parent != p else None,
+            "dirs": dirs, "drives": drives, "shortcuts": shortcuts,
+            "writable": os.access(p, os.W_OK)}
+
+
 def resolve(p):
     """Absolute paths as-is; relative paths: repo root, then data/, then newest upload."""
     p = Path(p)
@@ -125,6 +159,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, HTML.read_bytes(), "text/html; charset=utf-8")
         if u.path == "/api/env":
             return self.send(200, pkg_status())
+        if u.path == "/api/browse":
+            return self.send(200, browse(q.get("path", "")))
         if u.path == "/api/job":
             job = JOBS.get(q.get("id", ""))
             if not job:
@@ -181,6 +217,16 @@ class Handler(BaseHTTPRequestHandler):
                     fh.write(chunk)
                     remaining -= len(chunk)
             return self.send(200, {"path": str(dest)})
+        if u.path == "/api/mkdir":
+            req = self.body()
+            parent, name = Path(req.get("parent", "")), Path(req.get("name", "")).name
+            if not parent.is_absolute() or not name:
+                return self.send(400, {"error": "need absolute parent and a folder name"})
+            try:
+                (parent / name).mkdir(parents=False, exist_ok=True)
+            except OSError as e:
+                return self.send(400, {"error": str(e)})
+            return self.send(200, browse(str(parent / name)))
         if u.path == "/api/install":
             st = pkg_status()
             want = self.body().get("include_optional", False)
@@ -209,8 +255,12 @@ class Handler(BaseHTTPRequestHandler):
             if miss_pkg:
                 return self.send(400, {"error": f"Missing packages: {miss_pkg}. Install first."})
             out_dir = resolve(cfg.get("out_dir") or "output")
-            out_dir.mkdir(parents=True, exist_ok=True)
-            prefix = cfg.get("prefix") or "sdana05_"
+            try:
+                out_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                return self.send(400, {"error": f"Cannot create output folder {out_dir}: {e}"})
+            cfg["out_dir"] = str(out_dir)
+            prefix = cfg.get("prefix") or "deid_"
             cfg_path = out_dir / f"{prefix}config.json"
             cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
             cmd = [sys.executable, "-u", str(SCRIPT), "--config", str(cfg_path)]

@@ -21,6 +21,13 @@
   .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   .hint { color:var(--muted); font-size:12px; margin:6px 0 0; }
   .drop { border:2px dashed var(--b); border-radius:8px; padding:10px; text-align:center; color:var(--muted); cursor:pointer; }
+  #fb-back { position:fixed; inset:0; background:rgba(0,0,0,.35); display:flex; align-items:center; justify-content:center; z-index:10; }
+  #fb-back[hidden] { display:none; }
+  #fb { background:#fff; border-radius:8px; width:min(640px,92vw); max-height:82vh; display:flex; flex-direction:column; box-shadow:0 8px 30px rgba(0,0,0,.25); }
+  #fb header { background:var(--bg); color:inherit; padding:10px 14px; border-radius:8px 8px 0 0; border-bottom:1px solid var(--b); }
+  #fb-list { overflow:auto; flex:1; border-bottom:1px solid var(--b); }
+  #fb-list div { padding:6px 14px; cursor:pointer; } #fb-list div:hover { background:#eaeef2; }
+  #fb-short button { font-size:12px; padding:3px 8px; }
   .drop.ok { border-color:#1a7f37; color:#1a7f37; }
   table { width:100%; border-collapse:collapse; margin-top:8px; }
   th, td { border-bottom:1px solid var(--b); padding:5px 8px; text-align:left; font-size:13px; }
@@ -37,7 +44,7 @@
 <body>
 <header>
   <h1>Spatial De-identifier — Config Builder</h1>
-  <p>Builds <code>config.json</code> for <code>sdana05_optimizing valid subsets.py</code>. Files are read locally in your browser; nothing is uploaded.</p>
+  <p>Builds <code>config.json</code> for <code>deidentify.py</code> and runs it locally. Files never leave this computer.</p>
 </header>
 <main>
 
@@ -60,8 +67,12 @@
     <label>County file path</label><input type="text" id="county_file" placeholder="data/county.csv">
     <label>ZIP file path</label><input type="text" id="zip_file" placeholder="data/zip.csv">
     <label>Crosswalk file path</label><input type="text" id="crosswalk_file" placeholder="C:/.../COUNTY_ZIP.xlsx">
-    <label>Output directory</label><input type="text" id="out_dir" value="output">
-    <label>Output file prefix</label><input type="text" id="prefix" value="sdana05_">
+    <label>Output folder</label>
+    <div class="row" style="flex-wrap:nowrap">
+      <input type="text" id="out_dir" value="output" style="flex:1">
+      <button id="btn-browse" onclick="openBrowser()" title="Choose a folder on this computer">Browse…</button>
+    </div>
+    <label>Output file prefix</label><input type="text" id="prefix" value="deid_">
   </div>
 </section>
 
@@ -124,7 +135,7 @@
     </div>
     <div id="issues" style="margin-top:8px"></div>
     <pre id="out"></pre>
-    <p class="hint">Run: <code>python "analysis/sdana05_optimizing valid subsets.py" --config config.json [--workers N]</code></p>
+    <p class="hint">Run: <code>python app/deidentify.py --config config.json [--workers N]</code></p>
   </div>
 </section>
 
@@ -133,7 +144,7 @@
   <div class="body">
     <div id="offline" class="warn" hidden>
       Running needs the local app server. Close this page and start it with
-      <code>analysis/sdana05_launch.bat</code> (Windows) or <code>bash analysis/sdana05_launch.sh</code> (macOS/Linux).
+      <code>app/launch.bat</code> (Windows) or <code>bash app/launch.sh</code> (macOS/Linux).
       The launcher checks for Python and opens this page at <code>http://127.0.0.1:8765</code>.
     </div>
     <div id="online" hidden>
@@ -377,7 +388,7 @@ for (const kind of ["county", "zip", "cw"]) {
 }
 $("picker").onchange = e => { if (e.target.files[0]) ingest(pickTarget, e.target.files[0]); e.target.value = ""; };
 
-// ── Run: talks to sdana05_app_server.py when served from it ─────────────────
+// ── Run: talks to server.py when served from it ─────────────────────────────
 const ONLINE = location.protocol.startsWith("http");
 $(ONLINE ? "online" : "offline").hidden = false;
 let ENV = null;
@@ -396,7 +407,7 @@ async function checkEnv() {
     ENV = await api("/api/env");
   } catch (e) { $("run-status").innerHTML = `<span class="err">${esc(e.message)}</span>`; return; }
   const rows = [[`Python ${ENV.python}`, ENV.python_ok, ENV.executable],
-                ["Pipeline script", ENV.script_found, "sdana05_optimizing valid subsets.py"]];
+                ["Pipeline script", ENV.script_found, "deidentify.py"]];
   for (const [m, i] of Object.entries(ENV.required)) rows.push([m, i.installed, i.version || "missing (required)"]);
   for (const [m, i] of Object.entries(ENV.optional)) rows.push([m + " (optional)", i.installed, i.version || "missing — only for .parquet"]);
   $("env").innerHTML = rows.map(([n, ok, d]) => `<tr><td>${badge(ok)}</td><td>${esc(n)}</td><td class="hint">${esc(d)}</td></tr>`).join("");
@@ -490,6 +501,63 @@ async function showResults(job) {
 }
 
 if (ONLINE) checkEnv();
+if (!ONLINE) { $("btn-browse").disabled = true; $("btn-browse").title = "Start the app with launch.bat / launch.sh to browse folders"; }
+
+// ── Output folder picker (server lists folders; browsers cannot expose paths) ─
+let FB = null;
+function openBrowser() {
+  if (!$("fb-back")) {
+    document.body.insertAdjacentHTML("beforeend", `
+      <div id="fb-back" onclick="if(event.target===this) closeBrowser()">
+        <div id="fb">
+          <header><b>Choose output folder</b>
+            <div class="row" id="fb-short" style="margin-top:6px"></div></header>
+          <div class="row" style="padding:8px 14px; flex-wrap:nowrap">
+            <button onclick="fbGo(FB && FB.parent)" title="Up one level">↑ Up</button>
+            <input type="text" id="fb-path" style="flex:1" onkeydown="if(event.key==='Enter') fbGo(this.value)">
+            <button onclick="fbGo($('fb-path').value)">Go</button>
+          </div>
+          <div id="fb-list"></div>
+          <div class="row" style="padding:10px 14px; justify-content:space-between">
+            <span class="row"><input type="text" id="fb-new" placeholder="new folder name" style="width:170px">
+              <button onclick="fbMkdir()">Create</button></span>
+            <span class="row"><span id="fb-msg" class="hint" style="margin:0"></span>
+              <button onclick="closeBrowser()">Cancel</button>
+              <button class="primary" onclick="fbSelect()">Use this folder</button></span>
+          </div>
+        </div>
+      </div>`);
+  }
+  $("fb-back").hidden = false;
+  fbGo($("out_dir").value.trim());
+}
+function closeBrowser() { $("fb-back").hidden = true; }
+async function fbGo(path) {
+  if (path == null) return;
+  try { FB = await api(`/api/browse?path=${encodeURIComponent(path)}`); }
+  catch (e) { $("fb-msg").textContent = e.message; return; }
+  $("fb-path").value = FB.path;
+  const shorts = Object.entries(FB.shortcuts || {}).concat((FB.drives || []).map(d => [d, d]));
+  $("fb-short").innerHTML = shorts.map(([n, p]) =>
+    `<button data-p="${esc(p)}" onclick="fbGo(this.dataset.p)">${esc(n)}</button>`).join("");
+  const sep = FB.path.includes("\\") ? "\\" : "/";
+  const join = n => FB.path.replace(/[\\/]$/, "") + sep + n;
+  $("fb-list").innerHTML = FB.dirs.length
+    ? FB.dirs.map(n => `<div data-p="${esc(join(n))}" ondblclick="fbGo(this.dataset.p)" onclick="fbGo(this.dataset.p)">📁 ${esc(n)}</div>`).join("")
+    : `<div class="hint" style="cursor:default">No sub-folders.</div>`;
+  $("fb-msg").innerHTML = FB.error ? `<span class="err">${esc(FB.error)}</span>`
+    : FB.writable ? "" : `<span class="warn">Folder is not writable.</span>`;
+}
+async function fbMkdir() {
+  const name = $("fb-new").value.trim(); if (!name || !FB) return;
+  try { await api("/api/mkdir", { parent: FB.path, name }); $("fb-new").value = ""; fbGo(FB.path.replace(/[\\/]$/, "") + (FB.path.includes("\\") ? "\\" : "/") + name); }
+  catch (e) { $("fb-msg").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+function fbSelect() {
+  if (!FB) return;
+  $("out_dir").value = FB.path.replace(/\\/g, "/");
+  closeBrowser(); update();
+}
 
 // defaults
 setOpts("county_id", ["FIPS"], "FIPS");

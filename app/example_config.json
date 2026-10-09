@@ -1,0 +1,24 @@
+{
+  "county_file": "C:/path/to/county.csv",
+  "zip_file": "C:/path/to/zip.csv",
+  "crosswalk_file": "C:/path/to/COUNTY_ZIP.xlsx",
+  "out_dir": "output",
+  "prefix": "deid_",
+
+  "county_id": "FIPS",
+  "county_state": null,
+  "zip_id": "zcta",
+  "zip_state": "State",
+  "cw_zip": "ZIP",
+  "cw_county": "COUNTY",
+
+  "county_vars": {
+    "median_income": "continuous",
+    "RUCC_2023": "ordinal"
+  },
+  "zip_vars": {
+    "RPL_THEMES": "continuous",
+    "PrimaryRUCA": "ordinal",
+    "near_walmart": "binary"
+  }
+}

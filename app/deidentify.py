@@ -1,10 +1,11 @@
 """
-sdana05 - Optimizing valid subsets (standalone Python port of sdana02 + sdana03).
+Spatial de-identifier: categorise COUNTY- and ZIP-level variables so that no
+combination of categories identifies a State-ZIP or State-County.
 
 Phase 1: derive categorical variables (merge bins until each marginal bin passes).
 Phase 2: Apriori-style search for the largest valid subset, with re-coarsening.
 
-Speed-ups relative to the R chain:
+Implementation notes:
   * Variables are stored as integer bin codes (-1 = NA); no factors / data-frame copies.
   * Cell pass/fail is a few vectorised numpy passes (unique on packed int64 keys).
   * Merged (county x zip) data are never copied: codes are gathered via crosswalk indices.
@@ -12,7 +13,7 @@ Speed-ups relative to the R chain:
     stateless w.r.t. bin definitions (defs travel with each task, codes are cached),
     so no worker re-sync is needed when a coarsening is committed.
 
-Pass rule (same as R): a cell passes if >=2 ZIPs in each of >=2 states OR
+Pass rule: a cell passes if >=2 ZIPs in each of >=2 states OR
 >=2 counties in each of >=2 states.
 
 Generic inputs (any COUNTY-level and ZIP-level file + a ZIP<->COUNTY crosswalk):
@@ -26,8 +27,8 @@ Generic inputs (any COUNTY-level and ZIP-level file + a ZIP<->COUNTY crosswalk):
   * Any variable failing its Phase 1 marginal check is excluded from Phase 2.
 
 Usage:
-    python "analysis/sdana05_optimizing valid subsets.py" --config analysis/sdana05_example_config.json
-    python "analysis/sdana05_optimizing valid subsets.py" \
+    python app/deidentify.py --config app/example_config.json
+    python app/deidentify.py \
         --county-file county.csv --zip-file zip.csv --crosswalk-file COUNTY_ZIP.xlsx \
         --county-id FIPS --zip-id zcta --zip-state State --out-dir output \
         --county-vars OBESITY RUCC_2023:ordinal --zip-vars RPL_THEMES near_walmart:binary
@@ -54,7 +55,7 @@ VAR_TYPES = ("continuous", "ordinal", "binary", "auto")
 
 DEFAULTS = dict(
     county_file=None, zip_file=None, crosswalk_file=None,
-    out_dir="output", prefix="sdana05_",
+    out_dir="output", prefix="deid_",
     county_id="FIPS", county_state=None,      # None -> state = first 2 digits of FIPS
     zip_id="zcta", zip_state="State",
     cw_zip="ZIP", cw_county="COUNTY",
