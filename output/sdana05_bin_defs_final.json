@@ -1,0 +1,354 @@
+{
+ "RUCC_2023": {
+  "type": "ordinal",
+  "var": "RUCC_2023",
+  "n_merges": 3,
+  "passes": null,
+  "groups": [
+   [
+    1.0,
+    2.0
+   ],
+   [
+    3.0
+   ],
+   [
+    4.0,
+    5.0
+   ],
+   [
+    6.0
+   ],
+   [
+    7.0
+   ],
+   [
+    8.0,
+    9.0
+   ]
+  ],
+  "bin_labels": [
+   "1\u20132",
+   "3",
+   "4\u20135",
+   "6",
+   "7",
+   "8\u20139"
+  ]
+ },
+ "OBESITY": {
+  "type": "continuous",
+  "var": "OBESITY",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   35.0,
+   38.2,
+   40.8
+  ],
+  "bin_labels": [
+   "[-Inf,35)",
+   "[35,38.2)",
+   "[38.2,40.8)",
+   "[40.8,Inf]"
+  ]
+ },
+ "BPHIGH": {
+  "type": "continuous",
+  "var": "BPHIGH",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   34.0,
+   37.3,
+   41.2
+  ],
+  "bin_labels": [
+   "[-Inf,34)",
+   "[34,37.3)",
+   "[37.3,41.2)",
+   "[41.2,Inf]"
+  ]
+ },
+ "HIGHCHOL": {
+  "type": "continuous",
+  "var": "HIGHCHOL",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   32.6,
+   34.9,
+   36.9
+  ],
+  "bin_labels": [
+   "[-Inf,32.6)",
+   "[32.6,34.9)",
+   "[34.9,36.9)",
+   "[36.9,Inf]"
+  ]
+ },
+ "ISOLATION": {
+  "type": "continuous",
+  "var": "ISOLATION",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   32.8,
+   34.7,
+   36.4
+  ],
+  "bin_labels": [
+   "[-Inf,32.8)",
+   "[32.8,34.7)",
+   "[34.7,36.4)",
+   "[36.4,Inf]"
+  ]
+ },
+ "STROKE": {
+  "type": "continuous",
+  "var": "STROKE",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   3.1400000000000037,
+   3.6,
+   4.2
+  ],
+  "bin_labels": [
+   "[-Inf,3.14)",
+   "[3.14,3.6)",
+   "[3.6,4.2)",
+   "[4.2,Inf]"
+  ]
+ },
+ "COPD": {
+  "type": "continuous",
+  "var": "COPD",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   7.4,
+   8.8,
+   10.5
+  ],
+  "bin_labels": [
+   "[-Inf,7.4)",
+   "[7.4,8.8)",
+   "[8.8,10.5)",
+   "[10.5,Inf]"
+  ]
+ },
+ "CASTHMA": {
+  "type": "continuous",
+  "var": "CASTHMA",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   10.1,
+   10.7,
+   11.3
+  ],
+  "bin_labels": [
+   "[-Inf,10.1)",
+   "[10.1,10.7)",
+   "[10.7,11.3)",
+   "[11.3,Inf]"
+  ]
+ },
+ "median_income": {
+  "type": "continuous",
+  "var": "median_income",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   55832.0,
+   65346.0,
+   75598.0
+  ],
+  "bin_labels": [
+   "[-Inf,55832)",
+   "[55832,65346)",
+   "[65346,75598)",
+   "[75598,Inf]"
+  ]
+ },
+ "HI_coverage": {
+  "type": "continuous",
+  "var": "HI_coverage",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   87.56393866515617,
+   91.54312009704167,
+   94.08471494475769
+  ],
+  "bin_labels": [
+   "[-Inf,87.564)",
+   "[87.564,91.543)",
+   "[91.543,94.085)",
+   "[94.085,Inf]"
+  ]
+ },
+ "no_HS_rate": {
+  "type": "continuous",
+  "var": "no_HS_rate",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   7.117342310894567,
+   9.916900532118069,
+   14.114225030456794
+  ],
+  "bin_labels": [
+   "[-Inf,7.1173)",
+   "[7.1173,9.9169)",
+   "[9.9169,14.114)",
+   "[14.114,Inf]"
+  ]
+ },
+ "UE_rate": {
+  "type": "continuous",
+  "var": "UE_rate",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   3.2262082697031738,
+   4.452305412061065,
+   5.800665183391479
+  ],
+  "bin_labels": [
+   "[-Inf,3.2262)",
+   "[3.2262,4.4523)",
+   "[4.4523,5.8007)",
+   "[5.8007,Inf]"
+  ]
+ },
+ "PrimaryRUCA": {
+  "type": "ordinal",
+  "var": "PrimaryRUCA",
+  "n_merges": 7,
+  "passes": null,
+  "groups": [
+   [
+    1.0,
+    2.0,
+    3.0,
+    4.0
+   ],
+   [
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0
+   ],
+   [
+    10.0
+   ]
+  ],
+  "bin_labels": [
+   "1\u20134",
+   "5\u20139",
+   "10"
+  ]
+ },
+ "RPL_THEME1": {
+  "type": "continuous",
+  "var": "RPL_THEME1",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   25.0,
+   50.0,
+   75.0
+  ],
+  "bin_labels": [
+   "[-Inf,25)",
+   "[25,50)",
+   "[50,75)",
+   "[75,Inf]"
+  ]
+ },
+ "RPL_THEME2": {
+  "type": "continuous",
+  "var": "RPL_THEME2",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   25.0,
+   49.995000000000005,
+   74.99249999999999
+  ],
+  "bin_labels": [
+   "[-Inf,25)",
+   "[25,49.995)",
+   "[49.995,74.992)",
+   "[74.992,Inf]"
+  ]
+ },
+ "RPL_THEME3": {
+  "type": "continuous",
+  "var": "RPL_THEME3",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   24.64,
+   49.85,
+   74.94
+  ],
+  "bin_labels": [
+   "[-Inf,24.64)",
+   "[24.64,49.85)",
+   "[49.85,74.94)",
+   "[74.94,Inf]"
+  ]
+ },
+ "RPL_THEME4": {
+  "type": "continuous",
+  "var": "RPL_THEME4",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   24.9975,
+   50.0,
+   75.0
+  ],
+  "bin_labels": [
+   "[-Inf,24.997)",
+   "[24.997,50)",
+   "[50,75)",
+   "[75,Inf]"
+  ]
+ },
+ "RPL_THEMES": {
+  "type": "continuous",
+  "var": "RPL_THEMES",
+  "n_merges": 2,
+  "passes": null,
+  "breaks": [
+   10.0,
+   25.0,
+   50.0
+  ],
+  "bin_labels": [
+   "[-Inf,10)",
+   "[10,25)",
+   "[25,50)",
+   "[50,Inf]"
+  ]
+ },
+ "near_walmart": {
+  "type": "binary",
+  "var": "near_walmart",
+  "n_merges": 0,
+  "passes": true,
+  "levels": [
+   0.0,
+   1.0
+  ],
+  "bin_labels": [
+   "0",
+   "1"
+  ]
+ }
+}

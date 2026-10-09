@@ -70,11 +70,23 @@ df_updated <- df |>
 
 df_updated |> select(ends_with("_bin")) |> map(~table(.x, useNA = "always"))
 
-df_updated |> 
+df_shared = df_updated |> 
   group_by_at(vars(ends_with("_bin"))) |> 
   summarize(n = n(),
             n_state = n_distinct(state_fips)) |> 
   dplyr::filter(n >= 4, n_state >= 2) |> 
-  ungroup() |>
-  View()
+  ungroup() 
+
+
+df_updated |> 
+  group_by_at(vars(ends_with("_bin"))) |> 
+  summarize(n = n(),
+            n_state = n_distinct(state_fips)) |> 
+  dplyr::filter(n < 4 | n_state < 2) |> 
+  ungroup() 
+
+
+df_updated |>
+  dplyr::select(one_of(c("COUNTY","ZIP","state_fips")),contains("_bin")) |> 
+  write_csv(file.path(path_temporary_files, "sdana04_shared bins.csv"))
   

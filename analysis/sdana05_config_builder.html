@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Spatial De-identifier — Config Builder</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --b:#d0d7de; --muted:#57606a; --acc:#0969da; --bg:#f6f8fa; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; color:#1f2328; }
+  header { background:#24292f; color:#fff; padding:14px 24px; }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:4px 0 0; color:#c9d1d9; font-size:13px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 24px 60px; }
+  section { border:1px solid var(--b); border-radius:8px; margin-bottom:18px; background:#fff; }
+  section > h2 { margin:0; padding:10px 14px; font-size:15px; background:var(--bg); border-bottom:1px solid var(--b); border-radius:8px 8px 0 0; }
+  .body { padding: 14px; }
+  .grid { display:grid; grid-template-columns: 190px 1fr; gap:8px 12px; align-items:center; }
+  .grid label { color: var(--muted); }
+  input[type=text], select { width:100%; padding:6px 8px; border:1px solid var(--b); border-radius:6px; font:inherit; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .hint { color:var(--muted); font-size:12px; margin:6px 0 0; }
+  .drop { border:2px dashed var(--b); border-radius:8px; padding:10px; text-align:center; color:var(--muted); cursor:pointer; }
+  .drop.ok { border-color:#1a7f37; color:#1a7f37; }
+  table { width:100%; border-collapse:collapse; margin-top:8px; }
+  th, td { border-bottom:1px solid var(--b); padding:5px 8px; text-align:left; font-size:13px; }
+  th { background:var(--bg); position:sticky; top:0; }
+  .vars { max-height: 360px; overflow:auto; border:1px solid var(--b); border-radius:6px; }
+  button { padding:7px 14px; border-radius:6px; border:1px solid var(--b); background:#fff; cursor:pointer; font:inherit; }
+  button.primary { background:var(--acc); color:#fff; border-color:var(--acc); }
+  pre { background:#0d1117; color:#e6edf3; padding:12px; border-radius:6px; overflow:auto; max-height:420px; font-size:12px; }
+  .warn { color:#9a6700; } .err { color:#cf222e; }
+  .two { display:grid; grid-template-columns: 1fr 1fr; gap:18px; }
+  @media (max-width: 900px) { .two { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Spatial De-identifier — Config Builder</h1>
+  <p>Builds <code>config.json</code> for <code>sdana05_optimizing valid subsets.py</code>. Files are read locally in your browser; nothing is uploaded.</p>
+</header>
+<main>
+
+<section>
+  <h2>1. Load a sample of each file (optional, CSV only)</h2>
+  <div class="body">
+    <p class="hint" style="margin-top:0">Loaded files are uploaded to the local app when you click Run. CSV files also fill the column dropdowns from the first ~2,000 rows; for Excel/Parquet, type the column names manually.</p>
+    <div class="two">
+      <div><div class="drop" id="drop-county">County file: click or drop CSV</div></div>
+      <div><div class="drop" id="drop-zip">ZIP file: click or drop CSV</div></div>
+    </div>
+    <div style="margin-top:12px"><div class="drop" id="drop-cw">Crosswalk file: click or drop CSV</div></div>
+    <input type="file" id="picker" accept=".csv,.txt,.xlsx,.xls,.parquet" hidden>
+  </div>
+</section>
+
+<section>
+  <h2>2. Paths (as seen by the machine that runs the Python script)</h2>
+  <div class="body grid">
+    <label>County file path</label><input type="text" id="county_file" placeholder="data/county.csv">
+    <label>ZIP file path</label><input type="text" id="zip_file" placeholder="data/zip.csv">
+    <label>Crosswalk file path</label><input type="text" id="crosswalk_file" placeholder="C:/.../COUNTY_ZIP.xlsx">
+    <label>Output directory</label><input type="text" id="out_dir" value="output">
+    <label>Output file prefix</label><input type="text" id="prefix" value="sdana05_">
+  </div>
+</section>
+
+<section>
+  <h2>3. ID and state columns</h2>
+  <div class="body two">
+    <div class="grid">
+      <label>County ID (5-digit FIPS)</label><select id="county_id"></select>
+      <label>County state column</label><select id="county_state"></select>
+      <label>ZIP ID (ZIP / ZCTA)</label><select id="zip_id"></select>
+      <label>ZIP state column</label><select id="zip_state"></select>
+    </div>
+    <div class="grid">
+      <label>Crosswalk ZIP column</label><select id="cw_zip"></select>
+      <label>Crosswalk county column</label><select id="cw_county"></select>
+    </div>
+  </div>
+  <p class="hint" style="padding:0 14px 12px">County state "(derive from FIPS)" uses the first 2 digits of the FIPS code. IDs are zero-padded to 5 characters.</p>
+</section>
+
+<section>
+  <h2>4. Variables</h2>
+  <div class="body two">
+    <div>
+      <strong>County variables</strong>
+      <div class="row" style="margin-top:6px">
+        <button onclick="bulk('county',true)">Select all</button>
+        <button onclick="bulk('county',false)">Clear</button>
+        <input type="text" id="add-county" placeholder="add column name" style="width:180px">
+        <button onclick="addVar('county')">Add</button>
+      </div>
+      <div class="vars"><table><thead><tr><th></th><th>Column</th><th>Type</th><th>Sample</th></tr></thead><tbody id="tb-county"></tbody></table></div>
+    </div>
+    <div>
+      <strong>ZIP variables</strong>
+      <div class="row" style="margin-top:6px">
+        <button onclick="bulk('zip',true)">Select all</button>
+        <button onclick="bulk('zip',false)">Clear</button>
+        <input type="text" id="add-zip" placeholder="add column name" style="width:180px">
+        <button onclick="addVar('zip')">Add</button>
+      </div>
+      <div class="vars"><table><thead><tr><th></th><th>Column</th><th>Type</th><th>Sample</th></tr></thead><tbody id="tb-zip"></tbody></table></div>
+    </div>
+  </div>
+  <p class="hint" style="padding:0 14px 12px">
+    Types: <b>continuous</b> (quantile bins, ≥4 kept), <b>ordinal</b> (adjacent levels merged, ≥4 kept), <b>binary</b> (never merged), <b>auto</b> (decided by the script).
+    If no variables are selected on a side, the script uses every numeric non-ID column with type auto.
+  </p>
+</section>
+
+<section>
+  <h2>5. Config</h2>
+  <div class="body">
+    <div class="row">
+      <button class="primary" onclick="download()">Download config.json</button>
+      <button onclick="copyCfg()">Copy</button>
+      <button onclick="document.getElementById('load').click()">Load existing config…</button>
+      <input type="file" id="load" accept=".json" hidden>
+      <span id="status"></span>
+    </div>
+    <div id="issues" style="margin-top:8px"></div>
+    <pre id="out"></pre>
+    <p class="hint">Run: <code>python "analysis/sdana05_optimizing valid subsets.py" --config config.json [--workers N]</code></p>
+  </div>
+</section>
+
+<section>
+  <h2>6. Run</h2>
+  <div class="body">
+    <div id="offline" class="warn" hidden>
+      Running needs the local app server. Close this page and start it with
+      <code>analysis/sdana05_launch.bat</code> (Windows) or <code>bash analysis/sdana05_launch.sh</code> (macOS/Linux).
+      The launcher checks for Python and opens this page at <code>http://127.0.0.1:8765</code>.
+    </div>
+    <div id="online" hidden>
+      <div class="row">
+        <button onclick="checkEnv()">1. Check Python &amp; packages</button>
+        <button id="btn-install" onclick="installPkgs()" disabled>2. Install missing</button>
+        <label class="row" style="gap:4px"><input type="checkbox" id="opt-pkgs"> include optional (parquet)</label>
+        <label class="row" style="gap:4px">Workers <input type="text" id="workers" style="width:60px" placeholder="auto"></label>
+        <button class="primary" id="btn-run" onclick="runJob()" disabled>3. Run</button>
+        <span id="run-status"></span>
+      </div>
+      <table id="env" style="margin-top:8px"></table>
+      <pre id="log" style="margin-top:10px" hidden></pre>
+      <div id="results"></div>
+    </div>
+  </div>
+</section>
+
+</main>
+<script>
+const ORDINAL_MAX_LEVELS = 12;
+const TYPES = ["continuous", "ordinal", "binary", "auto"];
+const S = { county: {cols: [], vars: {}}, zip: {cols: [], vars: {}}, cw: {cols: []} };
+const $ = id => document.getElementById(id);
+
+// ── CSV parsing (header + sample rows; handles quoted fields) ────────────────
+function parseCSV(text, maxRows = 2000) {
+  const rows = []; let row = [], f = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; }
+      else f += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(f); f = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(f); f = ""; rows.push(row); row = [];
+      if (rows.length > maxRows) break;
+    } else f += c;
+  }
+  if (f !== "" || row.length) { row.push(f); rows.push(row); }
+  return rows;
+}
+
+function inferType(values) {
+  const nums = values.filter(v => v !== "" && v.toUpperCase() !== "NA").map(Number);
+  if (!nums.length || nums.some(isNaN)) return null;           // non-numeric
+  const u = [...new Set(nums)];
+  if (u.length < 2) return null;
+  if (u.length === 2) return "binary";
+  if (u.every(Number.isInteger) && u.length <= ORDINAL_MAX_LEVELS) return "ordinal";
+  return "continuous";
+}
+
+const guess = (cols, pats) => cols.find(c => pats.some(p => p.test(c))) || "";
+
+function ingest(kind, file) {
+  S[kind].file = file;
+  const pathId = kind === "cw" ? "crosswalk_file" : kind + "_file";
+  $(pathId).value = file.name;
+  const drop = $("drop-" + kind);
+  if (!/\.(csv|txt)$/i.test(file.name)) {
+    drop.textContent = `${file.name} — loaded (${(file.size / 1e6).toFixed(1)} MB). ` +
+      "Not CSV: type column names / add variables manually.";
+    drop.classList.add("ok");
+    update();
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const rows = parseCSV(e.target.result).filter(r => r.length > 1 || r[0] !== "");
+    const header = rows[0].map(h => h.trim().replace(/^\uFEFF/, ""));
+    const data = rows.slice(1);
+    drop.textContent = `${file.name} — ${header.length} columns, ${data.length} sample rows`;
+    drop.classList.add("ok");
+    if (kind === "cw") {
+      S.cw.cols = header;
+      setOpts("cw_zip", header, guess(header, [/^zip$/i, /zcta/i, /zip/i]));
+      setOpts("cw_county", header, guess(header, [/^county$/i, /fips/i, /county/i]));
+    } else {
+      S[kind].cols = header;
+      if (kind === "county") {
+        setOpts("county_id", header, guess(header, [/^fips$/i, /fips/i, /geoid/i, /county/i]));
+        setOpts("county_state", ["(derive from FIPS)", ...header],
+                guess(header, [/^state_?code$/i, /^state$/i, /state/i]) || "(derive from FIPS)");
+      } else {
+        setOpts("zip_id", header, guess(header, [/^zcta$/i, /^zip$/i, /zcta/i, /zip/i]));
+        setOpts("zip_state", header, guess(header, [/^state$/i, /state/i]));
+      }
+      const ids = new Set([$(kind + "_id").value, $(kind + "_state").value]);
+      S[kind].vars = {};
+      header.forEach((h, j) => {
+        const vals = data.map(r => (r[j] ?? "").trim());
+        const t = inferType(vals);
+        if (t === null) return;                                  // non-numeric / constant
+        S[kind].vars[h] = { on: !ids.has(h) && !/^(fips|zcta|zip|state)/i.test(h),
+                            type: t, sample: vals.filter(v => v).slice(0, 4).join(", ") };
+      });
+      renderVars(kind);
+    }
+    update();
+  };
+  reader.readAsText(file.slice(0, 5 * 1024 * 1024));            // first 5 MB is plenty
+}
+
+function setOpts(id, opts, sel) {
+  const el = $(id);
+  el.innerHTML = opts.map(o => `<option${o === sel ? " selected" : ""}>${esc(o)}</option>`).join("");
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function renderVars(kind) {
+  const tb = $("tb-" + kind);
+  const ids = new Set([$(kind + "_id").value, $(kind + "_state").value]);
+  tb.innerHTML = Object.entries(S[kind].vars).map(([name, v]) => `
+    <tr${ids.has(name) ? ' style="opacity:.45"' : ""}>
+      <td><input type="checkbox" data-k="${kind}" data-n="${esc(name)}" ${v.on ? "checked" : ""}></td>
+      <td>${esc(name)}</td>
+      <td><select data-k="${kind}" data-n="${esc(name)}">${TYPES.map(t =>
+        `<option${t === v.type ? " selected" : ""}>${t}</option>`).join("")}</select></td>
+      <td class="hint" style="margin:0">${esc(v.sample || "")}</td>
+    </tr>`).join("") || `<tr><td colspan="4" class="hint">Load a CSV or add columns manually.</td></tr>`;
+}
+
+function bulk(kind, on) { Object.values(S[kind].vars).forEach(v => v.on = on); renderVars(kind); update(); }
+function addVar(kind) {
+  const el = $("add-" + kind), n = el.value.trim();
+  if (!n) return;
+  S[kind].vars[n] = S[kind].vars[n] || { on: true, type: "auto", sample: "" };
+  S[kind].vars[n].on = true; el.value = "";
+  renderVars(kind); update();
+}
+
+document.addEventListener("change", e => {
+  const k = e.target.dataset.k, n = e.target.dataset.n;
+  if (k && n && S[k].vars[n]) {
+    if (e.target.type === "checkbox") S[k].vars[n].on = e.target.checked;
+    else S[k].vars[n].type = e.target.value;
+  }
+  if (["county_id", "county_state", "zip_id", "zip_state"].includes(e.target.id)) {
+    renderVars("county"); renderVars("zip");
+  }
+  update();
+});
+document.addEventListener("input", e => { if (e.target.tagName === "INPUT" && e.target.type === "text") update(); });
+
+// ── Build config + validation ────────────────────────────────────────────────
+function selVars(kind) {
+  const ids = new Set([$(kind + "_id").value, $(kind + "_state").value]);
+  const out = {};
+  for (const [n, v] of Object.entries(S[kind].vars)) if (v.on && !ids.has(n)) out[n] = v.type;
+  return Object.keys(out).length ? out : null;
+}
+
+function buildConfig() {
+  const cs = $("county_state").value;
+  return {
+    county_file: $("county_file").value.trim() || null,
+    zip_file: $("zip_file").value.trim() || null,
+    crosswalk_file: $("crosswalk_file").value.trim() || null,
+    out_dir: $("out_dir").value.trim() || "output",
+    prefix: $("prefix").value,
+    county_id: $("county_id").value || "FIPS",
+    county_state: (!cs || cs === "(derive from FIPS)") ? null : cs,
+    zip_id: $("zip_id").value || "zcta",
+    zip_state: $("zip_state").value || "State",
+    cw_zip: $("cw_zip").value || "ZIP",
+    cw_county: $("cw_county").value || "COUNTY",
+    county_vars: selVars("county"),
+    zip_vars: selVars("zip"),
+  };
+}
+
+function validate(c) {
+  const msgs = [];
+  for (const k of ["county_file", "zip_file", "crosswalk_file"])
+    if (!c[k]) msgs.push(["err", `${k} is required.`]);
+  if (c.county_vars && c.zip_vars) {
+    const clash = Object.keys(c.county_vars).filter(v => v in c.zip_vars);
+    if (clash.length) msgs.push(["err", `Variable name(s) in both files: ${clash.join(", ")}`]);
+  }
+  if (!c.county_vars) msgs.push(["warn", "No county variables selected → script will auto-detect all numeric columns."]);
+  if (!c.zip_vars) msgs.push(["warn", "No ZIP variables selected → script will auto-detect all numeric columns."]);
+  if (/^[A-Za-z]:\\|\\/.test((c.county_file || "") + (c.zip_file || "") + (c.crosswalk_file || "")))
+    msgs.push(["warn", "Backslashes in paths are fine in JSON, but forward slashes are more portable."]);
+  return msgs;
+}
+
+function update() {
+  const c = buildConfig();
+  $("out").textContent = JSON.stringify(c, null, 2);
+  $("issues").innerHTML = validate(c).map(([cls, m]) => `<div class="${cls}">${esc(m)}</div>`).join("");
+}
+
+function download() {
+  const blob = new Blob([JSON.stringify(buildConfig(), null, 2)], { type: "application/json" });
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: "config.json" });
+  a.click(); URL.revokeObjectURL(a.href);
+}
+function copyCfg() {
+  navigator.clipboard.writeText(JSON.stringify(buildConfig(), null, 2))
+    .then(() => { $("status").textContent = "Copied."; setTimeout(() => $("status").textContent = "", 1500); });
+}
+
+// ── Load an existing config back into the form ───────────────────────────────
+$("load").addEventListener("change", e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => {
+    const c = JSON.parse(t);
+    for (const k of ["county_file", "zip_file", "crosswalk_file", "out_dir", "prefix"])
+      if (c[k] != null) $(k).value = c[k];
+    const ensure = (id, v) => { if (v == null) return;
+      const el = $(id); if (![...el.options].some(o => o.value === v)) el.add(new Option(v)); el.value = v; };
+    ensure("county_id", c.county_id); ensure("zip_id", c.zip_id); ensure("zip_state", c.zip_state);
+    ensure("cw_zip", c.cw_zip); ensure("cw_county", c.cw_county);
+    ensure("county_state", c.county_state ?? "(derive from FIPS)");
+    for (const kind of ["county", "zip"]) {
+      const spec = c[kind + "_vars"]; if (!spec) continue;
+      const m = Array.isArray(spec)
+        ? Object.fromEntries(spec.map(s => { const [n, t] = s.split(":"); return [n, t || "auto"]; }))
+        : spec;
+      Object.values(S[kind].vars).forEach(v => v.on = false);
+      for (const [n, t] of Object.entries(m))
+        S[kind].vars[n] = { ...(S[kind].vars[n] || { sample: "" }), on: true, type: t };
+      renderVars(kind);
+    }
+    update();
+  }).catch(err => alert("Could not read config: " + err));
+  e.target.value = "";
+});
+
+// ── File drop zones ──────────────────────────────────────────────────────────
+let pickTarget = null;
+for (const kind of ["county", "zip", "cw"]) {
+  const d = $("drop-" + kind);
+  d.onclick = () => { pickTarget = kind; $("picker").click(); };
+  d.ondragover = e => { e.preventDefault(); d.style.borderColor = "#0969da"; };
+  d.ondragleave = () => d.style.borderColor = "";
+  d.ondrop = e => { e.preventDefault(); d.style.borderColor = ""; if (e.dataTransfer.files[0]) ingest(kind, e.dataTransfer.files[0]); };
+}
+$("picker").onchange = e => { if (e.target.files[0]) ingest(pickTarget, e.target.files[0]); e.target.value = ""; };
+
+// ── Run: talks to sdana05_app_server.py when served from it ─────────────────
+const ONLINE = location.protocol.startsWith("http");
+$(ONLINE ? "online" : "offline").hidden = false;
+let ENV = null;
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} :
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const badge = ok => ok ? '<span style="color:#1a7f37">✔</span>' : '<span class="err">✘</span>';
+
+async function checkEnv() {
+  try {
+    ENV = await api("/api/env");
+  } catch (e) { $("run-status").innerHTML = `<span class="err">${esc(e.message)}</span>`; return; }
+  const rows = [[`Python ${ENV.python}`, ENV.python_ok, ENV.executable],
+                ["Pipeline script", ENV.script_found, "sdana05_optimizing valid subsets.py"]];
+  for (const [m, i] of Object.entries(ENV.required)) rows.push([m, i.installed, i.version || "missing (required)"]);
+  for (const [m, i] of Object.entries(ENV.optional)) rows.push([m + " (optional)", i.installed, i.version || "missing — only for .parquet"]);
+  $("env").innerHTML = rows.map(([n, ok, d]) => `<tr><td>${badge(ok)}</td><td>${esc(n)}</td><td class="hint">${esc(d)}</td></tr>`).join("");
+  const reqOk = Object.values(ENV.required).every(i => i.installed);
+  const optMissing = Object.values(ENV.optional).some(i => !i.installed);
+  $("btn-install").disabled = reqOk && !optMissing;
+  $("btn-run").disabled = !(reqOk && ENV.python_ok && ENV.script_found);
+  $("run-status").textContent = reqOk ? "Ready to run." : "Install missing packages first.";
+}
+
+async function follow(job, onDone) {
+  const log = $("log"); log.hidden = false; let from = 0;
+  const tick = async () => {
+    const s = await api(`/api/job?id=${job}&from=${from}`);
+    if (s.lines.length) { log.textContent += s.lines.join("\n") + "\n"; log.scrollTop = log.scrollHeight; }
+    from = s.next;
+    if (s.status === "running") { $("run-status").textContent = "Running…"; setTimeout(tick, 700); }
+    else { $("run-status").innerHTML = s.status === "done" ? '<span style="color:#1a7f37">Finished.</span>'
+                                                          : `<span class="err">Failed (exit ${s.returncode}).</span>`;
+           onDone && onDone(s.status === "done"); }
+  };
+  tick();
+}
+
+async function installPkgs() {
+  $("log").textContent = "";
+  try {
+    const r = await api("/api/install", { include_optional: $("opt-pkgs").checked });
+    if (!r.job) { $("run-status").textContent = r.message; return checkEnv(); }
+    $("btn-install").disabled = $("btn-run").disabled = true;
+    follow(r.job, () => checkEnv());
+  } catch (e) { $("run-status").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+
+async function uploadFile(file, session) {
+  const r = await fetch(`/api/upload?session=${session}&name=${encodeURIComponent(file.name)}`,
+                        { method: "POST", body: file });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j.path;
+}
+
+async function runJob() {
+  const c = buildConfig();
+  const errs = validate(c).filter(([k]) => k === "err");
+  if (errs.length) { $("run-status").innerHTML = `<span class="err">${esc(errs[0][1])}</span>`; return; }
+  $("log").textContent = ""; $("results").innerHTML = "";
+  try {
+    // Send loaded files to the local server; the browser cannot expose their disk paths.
+    // A file is uploaded only if its path box still shows the loaded file's name;
+    // type a full path instead to use a file already on disk without uploading.
+    const session = Math.random().toString(36).slice(2, 12);
+    const isAbs = p => /^([A-Za-z]:[\\/]|\/|\\\\)/.test(p || "");
+    for (const [kind, key] of [["county", "county_file"], ["zip", "zip_file"], ["cw", "crosswalk_file"]]) {
+      const f = S[kind].file;
+      // Upload whenever a file was loaded in the page and no absolute path was typed.
+      if (f && !isAbs(c[key])) {
+        $("run-status").textContent = `Uploading ${f.name} (${(f.size / 1e6).toFixed(1)} MB)…`;
+        c[key] = await uploadFile(f, session);
+      } else if (!f && !isAbs(c[key])) {
+        $("log").textContent += `Note: ${key} "${c[key]}" was not loaded in the page; ` +
+          `the server will look for it under the repo, data/ and uploads/.\n`;
+        $("log").hidden = false;
+      }
+    }
+    const w = parseInt($("workers").value, 10);
+    const r = await api("/api/run", { config: c, workers: isNaN(w) ? null : w });
+    $("btn-run").disabled = true;
+    follow(r.job, ok => { $("btn-run").disabled = false; if (ok) showResults(r.job); });
+  } catch (e) { $("run-status").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+
+async function showResults(job) {
+  const r = await api(`/api/results?id=${job}`);
+  const s = r.summary || {};
+  const link = f => `<a href="/api/file?id=${job}&name=${encodeURIComponent(f)}">${esc(f)}</a>`;
+  let html = `<h3>Results</h3>
+    <p><b>Largest valid subset:</b> ${s.largest_valid_k ?? "?"} variable(s) — type <b>${esc(s.top_subset_type ?? "?")}</b><br>
+    <b>Top subset:</b> ${esc((s.top_subset || []).join(", "))}<br>
+    ${s.excluded_phase1?.length ? `<b>Excluded in Phase 1:</b> ${esc(s.excluded_phase1.join(", "))}<br>` : ""}
+    <b>All tied subsets:</b> ${(s.all_top_subsets || []).length}</p>
+    <p><b>Output folder:</b> <code>${esc(r.out_dir)}</code></p>
+    <ul>${r.files.map(f => `<li>${link(f)}</li>`).join("")}</ul>`;
+  if (r.top_cells_preview.length) {
+    const rows = r.top_cells_preview.map(l => parseCSV(l)[0]);
+    html += `<p><b>Top-subset cells</b> (first ${rows.length - 1})</p><div class="vars"><table>
+      <thead><tr>${rows[0].map(h => `<th>${esc(h)}</th>`).join("")}</tr></thead>
+      <tbody>${rows.slice(1).map(r => `<tr>${r.map(v => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  }
+  $("results").innerHTML = html;
+}
+
+if (ONLINE) checkEnv();
+
+// defaults
+setOpts("county_id", ["FIPS"], "FIPS");
+setOpts("county_state", ["(derive from FIPS)"], "(derive from FIPS)");
+setOpts("zip_id", ["zcta"], "zcta");
+setOpts("zip_state", ["State"], "State");
+setOpts("cw_zip", ["ZIP"], "ZIP");
+setOpts("cw_county", ["COUNTY"], "COUNTY");
+renderVars("county"); renderVars("zip"); update();
+</script>
+</body>
+</html>

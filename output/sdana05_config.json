@@ -1,0 +1,36 @@
+{
+  "county_file": "C:\\code\\external\\spatial-deidentifier\\uploads\\p5foc20x02\\ktdat13_county.csv",
+  "zip_file": "C:\\code\\external\\spatial-deidentifier\\uploads\\p5foc20x02\\ktdat13_zip_v2.csv",
+  "crosswalk_file": "C:\\code\\external\\spatial-deidentifier\\uploads\\p5foc20x02\\COUNTY_ZIP_122025.csv",
+  "out_dir": "output",
+  "prefix": "sdana05_",
+  "county_id": "FIPS",
+  "county_state": "state_code",
+  "zip_id": "zcta",
+  "zip_state": "State",
+  "cw_zip": "ZIP",
+  "cw_county": "COUNTY",
+  "county_vars": {
+    "RUCC_2023": "ordinal",
+    "OBESITY": "continuous",
+    "BPHIGH": "continuous",
+    "HIGHCHOL": "continuous",
+    "ISOLATION": "continuous",
+    "STROKE": "continuous",
+    "COPD": "continuous",
+    "CASTHMA": "continuous",
+    "median_income": "continuous",
+    "HI_coverage": "continuous",
+    "no_HS_rate": "continuous",
+    "UE_rate": "continuous"
+  },
+  "zip_vars": {
+    "PrimaryRUCA": "ordinal",
+    "RPL_THEME1": "continuous",
+    "RPL_THEME2": "continuous",
+    "RPL_THEME3": "continuous",
+    "RPL_THEME4": "continuous",
+    "RPL_THEMES": "continuous",
+    "near_walmart": "binary"
+  }
+}
