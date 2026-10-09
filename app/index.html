@@ -104,7 +104,7 @@
         <input type="text" id="add-county" placeholder="add column name" style="width:180px">
         <button onclick="addVar('county')">Add</button>
       </div>
-      <div class="vars"><table><thead><tr><th></th><th>Column</th><th>Type</th><th>Sample</th></tr></thead><tbody id="tb-county"></tbody></table></div>
+      <div class="vars"><table><thead><tr><th></th><th>Column</th><th>Type</th><th>Binning</th><th>Sample</th></tr></thead><tbody id="tb-county"></tbody></table></div>
     </div>
     <div>
       <strong>ZIP variables</strong>
@@ -114,12 +114,23 @@
         <input type="text" id="add-zip" placeholder="add column name" style="width:180px">
         <button onclick="addVar('zip')">Add</button>
       </div>
-      <div class="vars"><table><thead><tr><th></th><th>Column</th><th>Type</th><th>Sample</th></tr></thead><tbody id="tb-zip"></tbody></table></div>
+      <div class="vars"><table><thead><tr><th></th><th>Column</th><th>Type</th><th>Binning</th><th>Sample</th></tr></thead><tbody id="tb-zip"></tbody></table></div>
+    </div>
+  </div>
+  <div class="body" style="padding-top:0">
+    <div class="row">
+      <label for="percentiles">Default starting percentiles for continuous variables</label>
+      <input type="text" id="percentiles" value="10, 25, 50, 75, 90" style="width:200px">
     </div>
   </div>
   <p class="hint" style="padding:0 14px 12px">
-    Types: <b>continuous</b> (quantile bins, ≥4 kept), <b>ordinal</b> (adjacent levels merged, ≥4 kept), <b>binary</b> (never merged), <b>auto</b> (decided by the script).
-    If no variables are selected on a side, the script uses every numeric non-ID column with type auto.
+    Types: <b>continuous</b> (bins merged until they pass, ≥4 kept), <b>ordinal</b> (adjacent levels merged, ≥4 kept), <b>binary</b> (never merged), <b>auto</b> (decided by the script).
+    If no variables are selected on a side, the script uses every numeric non-ID column with type auto.<br>
+    <b>Binning</b> (continuous only):
+    <b>default</b> uses the percentiles above;
+    <b>percentiles</b> sets this variable's own percentiles (0–100);
+    <b>cutoffs</b> sets break-points in the variable's own units (e.g. <code>40000, 60000, 80000</code>; each bin includes its lower bound).
+    These are starting points that are still merged if a bin fails. Tick <b>fixed</b> to keep them exactly: the variable is then never merged, and is excluded if any bin fails.
   </p>
 </section>
 
@@ -241,8 +252,11 @@ function ingest(kind, file) {
         const vals = data.map(r => (r[j] ?? "").trim());
         const t = inferType(vals);
         if (t === null) return;                                  // non-numeric / constant
+        const nums = vals.filter(v => v !== "" && !isNaN(+v)).map(Number);
+        const range = nums.length ? `range ${Math.min(...nums)} – ${Math.max(...nums)}` : "";
         S[kind].vars[h] = { on: !ids.has(h) && !/^(fips|zcta|zip|state)/i.test(h),
-                            type: t, sample: vals.filter(v => v).slice(0, 4).join(", ") };
+                            type: t, mode: "default", values: "", fixed: false,
+                            sample: t === "continuous" ? range : vals.filter(v => v).slice(0, 4).join(", ") };
       });
       renderVars(kind);
     }
@@ -257,46 +271,77 @@ function setOpts(id, opts, sel) {
 }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
+const MODES = ["default", "percentiles", "cutoffs"];
+function binCell(kind, name, v) {
+  if (v.type !== "continuous" && v.type !== "auto") return `<td class="hint" style="margin:0">—</td>`;
+  const a = `data-k="${kind}" data-n="${esc(name)}"`;
+  const mode = v.mode || "default";
+  return `<td style="white-space:nowrap">
+    <select ${a} data-f="mode">${MODES.map(m => `<option${m === mode ? " selected" : ""}>${m}</option>`).join("")}</select>
+    ${mode === "default" ? "" : `<input type="text" ${a} data-f="values" value="${esc(v.values || "")}"
+        placeholder="${mode === "percentiles" ? "e.g. 20, 40, 60, 80" : "e.g. 40000, 60000, 80000"}" style="width:150px">`}
+    <label title="Keep these bins exactly; never merge"><input type="checkbox" ${a} data-f="fixed" ${v.fixed ? "checked" : ""}> fixed</label>
+  </td>`;
+}
+
 function renderVars(kind) {
   const tb = $("tb-" + kind);
   const ids = new Set([$(kind + "_id").value, $(kind + "_state").value]);
   tb.innerHTML = Object.entries(S[kind].vars).map(([name, v]) => `
     <tr${ids.has(name) ? ' style="opacity:.45"' : ""}>
-      <td><input type="checkbox" data-k="${kind}" data-n="${esc(name)}" ${v.on ? "checked" : ""}></td>
+      <td><input type="checkbox" data-k="${kind}" data-n="${esc(name)}" data-f="on" ${v.on ? "checked" : ""}></td>
       <td>${esc(name)}</td>
-      <td><select data-k="${kind}" data-n="${esc(name)}">${TYPES.map(t =>
+      <td><select data-k="${kind}" data-n="${esc(name)}" data-f="type">${TYPES.map(t =>
         `<option${t === v.type ? " selected" : ""}>${t}</option>`).join("")}</select></td>
+      ${binCell(kind, name, v)}
       <td class="hint" style="margin:0">${esc(v.sample || "")}</td>
-    </tr>`).join("") || `<tr><td colspan="4" class="hint">Load a CSV or add columns manually.</td></tr>`;
+    </tr>`).join("") || `<tr><td colspan="5" class="hint">Load a CSV or add columns manually.</td></tr>`;
 }
 
 function bulk(kind, on) { Object.values(S[kind].vars).forEach(v => v.on = on); renderVars(kind); update(); }
 function addVar(kind) {
   const el = $("add-" + kind), n = el.value.trim();
   if (!n) return;
-  S[kind].vars[n] = S[kind].vars[n] || { on: true, type: "auto", sample: "" };
+  S[kind].vars[n] = S[kind].vars[n] || { on: true, type: "auto", mode: "default", values: "", fixed: false, sample: "" };
   S[kind].vars[n].on = true; el.value = "";
   renderVars(kind); update();
 }
 
+function setVarField(t) {
+  const k = t.dataset.k, n = t.dataset.n, f = t.dataset.f;
+  if (!(k && n && f && S[k].vars[n])) return false;
+  S[k].vars[n][f] = t.type === "checkbox" ? t.checked : t.value;
+  return f;
+}
 document.addEventListener("change", e => {
-  const k = e.target.dataset.k, n = e.target.dataset.n;
-  if (k && n && S[k].vars[n]) {
-    if (e.target.type === "checkbox") S[k].vars[n].on = e.target.checked;
-    else S[k].vars[n].type = e.target.value;
-  }
+  const f = setVarField(e.target);
+  if (f === "type" || f === "mode") renderVars(e.target.dataset.k);   // show/hide binning inputs
   if (["county_id", "county_state", "zip_id", "zip_state"].includes(e.target.id)) {
     renderVars("county"); renderVars("zip");
   }
   update();
 });
-document.addEventListener("input", e => { if (e.target.tagName === "INPUT" && e.target.type === "text") update(); });
+document.addEventListener("input", e => {
+  if (e.target.tagName === "INPUT" && e.target.type === "text") { setVarField(e.target); update(); }
+});
 
 // ── Build config + validation ────────────────────────────────────────────────
+const parseNums = s => String(s || "").split(/[\s,;]+/).filter(Boolean).map(Number);
+
 function selVars(kind) {
   const ids = new Set([$(kind + "_id").value, $(kind + "_state").value]);
   const out = {};
-  for (const [n, v] of Object.entries(S[kind].vars)) if (v.on && !ids.has(n)) out[n] = v.type;
+  for (const [n, v] of Object.entries(S[kind].vars)) {
+    if (!v.on || ids.has(n)) continue;
+    const mode = v.mode || "default";
+    const binnable = v.type === "continuous" || v.type === "auto";
+    if (!binnable || (mode === "default" && !v.fixed)) { out[n] = v.type; continue; }
+    const spec = { type: "continuous" };              // explicit binning implies continuous
+    if (mode === "percentiles") spec.percentiles = parseNums(v.values);
+    if (mode === "cutoffs") spec.cutoffs = parseNums(v.values);
+    if (v.fixed) spec.fixed = true;
+    out[n] = spec;
+  }
   return Object.keys(out).length ? out : null;
 }
 
@@ -316,6 +361,8 @@ function buildConfig() {
     cw_county: $("cw_county").value || "COUNTY",
     county_vars: selVars("county"),
     zip_vars: selVars("zip"),
+    percentiles: (() => { const p = parseNums($("percentiles").value);
+                          return p.length ? p : null; })(),
   };
 }
 
@@ -323,6 +370,21 @@ function validate(c) {
   const msgs = [];
   for (const k of ["county_file", "zip_file", "crosswalk_file"])
     if (!c[k]) msgs.push(["err", `${k} is required.`]);
+  const badPct = p => !p.length || p.some(x => isNaN(x) || x <= 0 || x >= 100);
+  if (c.percentiles && badPct(c.percentiles))
+    msgs.push(["err", "Default percentiles must be numbers strictly between 0 and 100."]);
+  for (const side of ["county_vars", "zip_vars"]) {
+    for (const [n, s] of Object.entries(c[side] || {})) {
+      if (typeof s !== "object") continue;
+      if (s.percentiles && badPct(s.percentiles))
+        msgs.push(["err", `${n}: percentiles must be numbers strictly between 0 and 100.`]);
+      if (s.cutoffs) {
+        if (!s.cutoffs.length || s.cutoffs.some(isNaN)) msgs.push(["err", `${n}: enter numeric cutoffs.`]);
+        else if (new Set(s.cutoffs).size < 3)
+          msgs.push(["warn", `${n}: fewer than 3 cutoffs gives fewer than 4 categories.`]);
+      }
+    }
+  }
   if (c.county_vars && c.zip_vars) {
     const clash = Object.keys(c.county_vars).filter(v => v in c.zip_vars);
     if (clash.length) msgs.push(["err", `Variable name(s) in both files: ${clash.join(", ")}`]);
@@ -362,14 +424,21 @@ $("load").addEventListener("change", e => {
     ensure("county_id", c.county_id); ensure("zip_id", c.zip_id); ensure("zip_state", c.zip_state);
     ensure("cw_zip", c.cw_zip); ensure("cw_county", c.cw_county);
     ensure("county_state", c.county_state ?? "(derive from FIPS)");
+    if (Array.isArray(c.percentiles))
+      $("percentiles").value = c.percentiles.map(p => p <= 1 ? +(p * 100).toFixed(4) : p).join(", ");
     for (const kind of ["county", "zip"]) {
       const spec = c[kind + "_vars"]; if (!spec) continue;
       const m = Array.isArray(spec)
         ? Object.fromEntries(spec.map(s => { const [n, t] = s.split(":"); return [n, t || "auto"]; }))
         : spec;
       Object.values(S[kind].vars).forEach(v => v.on = false);
-      for (const [n, t] of Object.entries(m))
-        S[kind].vars[n] = { ...(S[kind].vars[n] || { sample: "" }), on: true, type: t };
+      for (const [n, s] of Object.entries(m)) {
+        const o = typeof s === "object" && s ? s : { type: s };
+        const mode = o.cutoffs ? "cutoffs" : o.percentiles ? "percentiles" : "default";
+        const vals = o.cutoffs || (o.percentiles || []).map(p => p <= 1 ? +(p * 100).toFixed(4) : p);
+        S[kind].vars[n] = { ...(S[kind].vars[n] || { sample: "" }), on: true,
+                            type: o.type || "auto", mode, values: vals.join(", "), fixed: !!o.fixed };
+      }
       renderVars(kind);
     }
     update();

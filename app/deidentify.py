@@ -25,6 +25,13 @@ Generic inputs (any COUNTY-level and ZIP-level file + a ZIP<->COUNTY crosswalk):
       2 distinct values -> binary; integer with <= ORDINAL_MAX_LEVELS values -> ordinal;
       otherwise continuous.
   * Any variable failing its Phase 1 marginal check is excluded from Phase 2.
+  * Continuous binning (config only): a variable spec may be an object, e.g.
+      "OBESITY": {"type": "continuous", "percentiles": [20, 40, 60, 80]}
+      "median_income": {"type": "continuous", "cutoffs": [40000, 60000, 80000], "fixed": true}
+    percentiles: 0-100 (or 0-1); cutoffs: raw-value break-points (left-closed bins).
+    fixed: true -> never merge/coarsen this variable (it is excluded if it fails).
+    Top-level "percentiles" sets the default for all continuous variables
+    (default 10, 25, 50, 75, 90).
 
 Usage:
     python app/deidentify.py --config app/example_config.json
@@ -60,7 +67,21 @@ DEFAULTS = dict(
     zip_id="zcta", zip_state="State",
     cw_zip="ZIP", cw_county="COUNTY",
     county_vars=None, zip_vars=None,           # None -> all numeric non-ID columns (auto)
+    percentiles=None,                          # None -> INIT_PROBS for continuous variables
 )
+
+
+def norm_probs(p, label):
+    """Percentiles given as 0-100 or 0-1 -> sorted unique fractions in (0, 1)."""
+    try:
+        p = [float(v) for v in p]
+    except (TypeError, ValueError):
+        raise SystemExit(f"{label}: percentiles must be numbers, got {p!r}")
+    if any(v > 1 for v in p):
+        p = [v / 100 for v in p]
+    if not p or any(not 0 < v < 1 for v in p):
+        raise SystemExit(f"{label}: percentiles must be strictly between 0 and 100")
+    return sorted(set(p))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -151,23 +172,25 @@ def apply_def(x, d):
 
 
 def coarsen_one_step(d):
-    if d["type"] == "binary":
+    if d["type"] == "binary" or d.get("fixed"):
         return []
+    keep = {k: v for k, v in d.items() if k != "eval_result"}   # carry init/fixed metadata
     out = []
     if d["type"] == "continuous":
         b = list(d["breaks"])
         if len(b) <= 3:
             return []
         for i in range(len(b)):
-            out.append(make_def("continuous", d["var"], d["n_merges"] + 1, None,
-                                breaks=b[:i] + b[i + 1:]))
+            out.append({**keep, **make_def("continuous", d["var"], d["n_merges"] + 1, None,
+                                           breaks=b[:i] + b[i + 1:])})
     else:
         g = [list(x) for x in d["groups"]]
         if len(g) <= 3:
             return []
         for i in range(len(g) - 1):
             ng = g[:i] + [sorted(g[i] + g[i + 1])] + g[i + 2:]
-            out.append(make_def("ordinal", d["var"], d["n_merges"] + 1, None, groups=ng))
+            out.append({**keep, **make_def("ordinal", d["var"], d["n_merges"] + 1, None,
+                                           groups=ng)})
     return out
 
 
@@ -200,13 +223,13 @@ def eval_marginal(codes, unit, state, n_state, n_unit):
     return res
 
 
-def merge_continuous(x, var, init_breaks, ev):
+def merge_continuous(x, var, init_breaks, ev, fixed=False):
     breaks = sorted(set(init_breaks))
     it = 0
     while True:
         d = make_def("continuous", var, it, None, breaks=breaks)
         res = ev(apply_def(x, d))
-        if res["passes"].all() or it >= MAX_ITER or len(breaks) < 3:
+        if fixed or res["passes"].all() or it >= MAX_ITER or len(breaks) < 3:
             break
         i = int(np.flatnonzero(~res["passes"].values)[0])
         breaks = breaks[:i] + breaks[i + 1:] if i < len(res) - 1 else breaks[:-1]
@@ -368,27 +391,34 @@ def infer_type(x):
 
 
 def parse_var_spec(spec):
-    """None | list['NAME' or 'NAME:type'] | dict{NAME: type} -> dict or None."""
+    """None | list['NAME' or 'NAME:type'] | dict{NAME: type | {type, percentiles|cutoffs, fixed}}
+    -> {NAME: {"type": ..., ...}} or None."""
     if spec is None:
         return None
-    if isinstance(spec, dict):
-        return dict(spec)
     out = {}
+    if isinstance(spec, dict):
+        for name, s in spec.items():
+            if isinstance(s, dict):
+                out[name] = {**s, "type": s.get("type") or "auto"}
+            else:
+                out[name] = {"type": s or "auto"}
+        return out
     for s in spec:
         name, _, t = s.partition(":")
-        out[name] = t or "auto"
+        out[name] = {"type": t or "auto"}
     return out
 
 
 def resolve_vars(df, spec, exclude, label):
-    """Return {var: (type, float array)} for the requested (or auto-detected) variables."""
+    """Return {var: (type, float array, binning opts)} for requested (or auto) variables."""
     spec = parse_var_spec(spec)
     if not spec:
-        spec = {c: "auto" for c in df.columns
+        spec = {c: {"type": "auto"} for c in df.columns
                 if c not in exclude and pd.api.types.is_numeric_dtype(df[c])}
     require_cols(df, list(spec), label)
     out = {}
-    for v, t in spec.items():
+    for v, s in spec.items():
+        t = s["type"]
         if t not in VAR_TYPES:
             raise SystemExit(f"{label}: unknown type '{t}' for '{v}' (use {VAR_TYPES})")
         x = pd.to_numeric(df[v], errors="coerce").to_numpy(float)
@@ -396,7 +426,28 @@ def resolve_vars(df, spec, exclude, label):
         if auto is None:
             print(f"  skipping {label} variable '{v}': fewer than 2 distinct values")
             continue
-        out[v] = (auto if t == "auto" else t, x)
+        has_p, has_c = s.get("percentiles") is not None, s.get("cutoffs") is not None
+        if has_p and has_c:
+            raise SystemExit(f"{label}: '{v}' has both percentiles and cutoffs; use one.")
+        if t == "auto" and (has_p or has_c):
+            t = "continuous"                      # explicit binning implies continuous
+        typ = auto if t == "auto" else t
+        opts = {}
+        if typ == "continuous":
+            if has_p:
+                opts["percentiles"] = norm_probs(s["percentiles"], f"{label}: '{v}'")
+            if has_c:
+                try:
+                    cuts = sorted(set(float(c) for c in s["cutoffs"]))
+                except (TypeError, ValueError):
+                    raise SystemExit(f"{label}: '{v}' cutoffs must be numbers")
+                if not cuts:
+                    raise SystemExit(f"{label}: '{v}' cutoffs list is empty")
+                opts["cutoffs"] = cuts
+            opts["fixed"] = bool(s.get("fixed", False))
+        elif has_p or has_c or s.get("fixed"):
+            print(f"  note: binning options ignored for {typ} variable '{v}'")
+        out[v] = (typ, x, opts)
     return out
 
 
@@ -446,9 +497,11 @@ def load_raw(cfg):
           f"({(cw_cidx >= 0).mean():.0%} matched county, {(cw_zidx >= 0).mean():.0%} matched zip)")
 
     raw = dict(
-        county_raw={v: x for v, (_, x) in c_vars.items()},
-        zip_raw={v: x for v, (_, x) in z_vars.items()},
-        types={**{v: t for v, (t, _) in c_vars.items()}, **{v: t for v, (t, _) in z_vars.items()}},
+        county_raw={v: x for v, (_, x, _) in c_vars.items()},
+        zip_raw={v: x for v, (_, x, _) in z_vars.items()},
+        types={v: t for v, (t, _, _) in {**c_vars, **z_vars}.items()},
+        opts={v: o for v, (_, _, o) in {**c_vars, **z_vars}.items()},
+        default_percentiles=norm_probs(cfg.get("percentiles") or INIT_PROBS, "percentiles"),
         source={**{v: "county" for v in c_vars}, **{v: "zip" for v in z_vars}},
         county_ids=county[cid].to_numpy(), zip_ids=zipd[zid].to_numpy(),
         county_state_lab=c_state_lab.to_numpy(), zip_state_lab=z_state_lab.to_numpy(),
@@ -481,7 +534,14 @@ def phase1(raw):
         src = raw["source"][v]
         x = raw[f"{src}_raw"][v]
         if t == "continuous":
-            d = merge_continuous(x, v, quantile_breaks(x), ev[src])
+            o = raw["opts"].get(v, {})
+            if "cutoffs" in o:
+                init, how, vals = o["cutoffs"], "cutoffs", o["cutoffs"]
+            else:
+                probs = o.get("percentiles") or raw["default_percentiles"]
+                init, how, vals = quantile_breaks(x, probs), "percentiles", [p * 100 for p in probs]
+            d = merge_continuous(x, v, init, ev[src], fixed=o.get("fixed", False))
+            d.update(init=how, init_values=vals, fixed=o.get("fixed", False))
         elif t == "ordinal":
             d = merge_ordinal(x, v, ev[src])
         else:
@@ -617,6 +677,8 @@ def load_config(argv=None):
     ap.add_argument("--cw-county", help="County FIPS column in crosswalk")
     ap.add_argument("--county-vars", nargs="+", help="NAME or NAME:type ...")
     ap.add_argument("--zip-vars", nargs="+", help="NAME or NAME:type ...")
+    ap.add_argument("--percentiles", nargs="+", type=float,
+                    help="Default starting percentiles for continuous variables (0-100)")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     a = ap.parse_args(argv)
 
@@ -659,6 +721,9 @@ def main():
         rows.append(dict(variable=v, dataset=raw["source"][v], var_type=d["type"],
                          n_bins=len(d["bin_labels"]), n_merges=d["n_merges"],
                          passes=d["passes"], n_fail_bins=int((~res["passes"]).sum()),
+                         binning=d.get("init", ""),
+                         binning_values=", ".join(fmt(float(z)) for z in d.get("init_values", [])),
+                         fixed=bool(d.get("fixed", False)),
                          categories=" | ".join(d["bin_labels"])))
     pd.DataFrame(rows).to_csv(out("marginal_summary.csv"), index=False)
 

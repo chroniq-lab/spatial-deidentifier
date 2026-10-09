@@ -13,12 +13,13 @@
   "cw_county": "COUNTY",
 
   "county_vars": {
-    "median_income": "continuous",
+    "median_income": {"type": "continuous", "cutoffs": [40000, 60000, 80000]},
     "RUCC_2023": "ordinal"
   },
   "zip_vars": {
-    "RPL_THEMES": "continuous",
+    "RPL_THEMES": {"type": "continuous", "percentiles": [20, 40, 60, 80]},
     "PrimaryRUCA": "ordinal",
     "near_walmart": "binary"
-  }
+  },
+  "percentiles": [10, 25, 50, 75, 90]
 }

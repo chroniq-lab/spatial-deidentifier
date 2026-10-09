@@ -31,6 +31,27 @@ python app/deidentify.py --config app/example_config.json [--workers N]
 
 Requires `numpy`, `pandas` and `openpyxl`. `pyarrow` is optional and only needed for `.parquet` files.
 
+## Custom percentiles and cutoffs
+
+By default, continuous variables start from the 10/25/50/75/90th percentiles. You can change this in the app (section 4, **Binning** column) or in the config:
+
+```json
+"percentiles": [20, 40, 60, 80],
+"county_vars": {
+  "OBESITY":       {"type": "continuous", "percentiles": [10, 30, 50, 70, 90]},
+  "median_income": {"type": "continuous", "cutoffs": [40000, 60000, 80000], "fixed": true},
+  "RUCC_2023":     "ordinal"
+}
+```
+
+- **Top-level `percentiles`:** the default for every continuous variable. Values are 0–100; fractions such as `0.25` also work.
+- **`percentiles` on a variable:** that variable's own starting percentiles.
+- **`cutoffs` on a variable:** break-points in the variable's own units. Each bin includes its lower bound and excludes its upper bound, so `[40000, 60000, 80000]` gives `<40000`, `40000–59999`, `60000–79999` and `≥80000`.
+- **`fixed: true`:** the categories are used exactly as given. They are never merged in Phase 1 or coarsened in Phase 2. If any category fails the pass rule, the variable is excluded.
+  - Without `fixed`, percentiles and cutoffs are only starting points, and failing categories are merged as usual.
+
+Use either `percentiles` or `cutoffs` on a variable, not both. Giving either one implies the variable is continuous. On the command line, `--percentiles 20 40 60 80` sets the default.
+
 ## How it works
 
 - **Phase 1: categorise each variable on its own.**
@@ -88,6 +109,7 @@ Only the variables in the top subset (or any subset in `all_top_subsets_cells.cs
 - `n_merges`: merges needed to reach that.
 - `passes`: whether every category meets the pass rule.
 - `n_fail_bins`: categories still failing (0 if `passes`).
+- `binning`, `binning_values`, `fixed`: for continuous variables, how the starting bins were set (`percentiles` or `cutoffs`), the values used, and whether the bins were fixed.
 - `categories`: category labels, separated by `|`.
 
 **`top_subset_cells.csv` / `all_top_subsets_cells.csv`**
